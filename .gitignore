@@ -1,0 +1,21 @@
+# Local dev secrets — never commit these
+.env
+
+# SQLite leftover from local development
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/

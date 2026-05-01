@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: tennis-ladder
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 60
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true        # Render generates a random value automatically
+      - key: DATABASE_URL
+        sync: false                # You paste this from Neon after creating the DB
+      - key: ADMIN_PASSWORD
+        sync: false                # Set to your own secure password
+      - key: PYTHON_VERSION
+        value: 3.11.0

@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Register — Tennis Ladder{% endblock %}
+
+{% block content %}
+<div class="min-h-[60vh] flex items-start justify-center pt-8 sm:pt-12 px-0">
+<div class="w-full max-w-sm">
+
+  <!-- Header -->
+  <div class="text-center mb-8">
+    <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-green-700 shadow-lg mb-4">
+      <span class="text-3xl">🎾</span>
+    </div>
+    <h1 class="text-2xl font-bold text-slate-900">Join the Ladder</h1>
+    <p class="text-sm text-slate-500 mt-1">Create your Tennis Ladder account</p>
+  </div>
+
+  <!-- Card -->
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+    <form method="POST" action="{{ url_for('register') }}" class="p-6 space-y-5">
+
+      <!-- Username -->
+      <div class="space-y-1.5">
+        <label for="username" class="block text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Username
+        </label>
+        <input id="username" name="username" type="text" autocomplete="username"
+               value="{{ request.form.username or '' }}" required autofocus
+               placeholder="3–30 characters"
+               class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3
+                      text-sm text-slate-900 placeholder:text-slate-300
+                      focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition" />
+      </div>
+
+      <!-- Email -->
+      <div class="space-y-1.5">
+        <label for="email" class="block text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Email
+        </label>
+        <input id="email" name="email" type="email" autocomplete="email"
+               value="{{ request.form.email or '' }}" required
+               class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3
+                      text-sm text-slate-900 placeholder:text-slate-300
+                      focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition" />
+      </div>
+
+      <!-- Password -->
+      <div class="space-y-1.5">
+        <label for="password" class="block text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Password
+        </label>
+        <input id="password" name="password" type="password" autocomplete="new-password" required
+               placeholder="Minimum 8 characters"
+               class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3
+                      text-sm text-slate-900 placeholder:text-slate-300
+                      focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition" />
+      </div>
+
+      <!-- Confirm password -->
+      <div class="space-y-1.5">
+        <label for="confirm_password" class="block text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Confirm Password
+        </label>
+        <input id="confirm_password" name="confirm_password" type="password"
+               autocomplete="new-password" required
+               class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3
+                      text-sm text-slate-900 placeholder:text-slate-300
+                      focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition" />
+      </div>
+
+      <!-- Ladder profile -->
+      <div class="space-y-1.5">
+        <label for="player_id" class="block text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Ladder Profile
+        </label>
+        <div class="relative">
+          <select id="player_id" name="player_id"
+                  class="w-full appearance-none bg-white border border-slate-200 rounded-xl px-4 py-3 pr-10
+                         text-sm text-slate-900
+                         focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition">
+            <option value="new">➕ New player — join at the bottom</option>
+            {% if free_players %}
+            <optgroup label="Claim an existing spot">
+              {% for p in free_players %}
+              <option value="{{ p.id }}" {% if request.form.player_id == p.id|string %}selected{% endif %}>
+                #{{ p.position }} — {{ p.name }}
+              </option>
+              {% endfor %}
+            </optgroup>
+            {% endif %}
+          </select>
+          <div class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </div>
+        </div>
+        <p class="text-xs text-slate-400">
+          Claiming a spot links your account to an existing ladder entry.
+        </p>
+      </div>
+
+      <!-- Submit -->
+      <button type="submit"
+              class="w-full bg-green-700 hover:bg-green-600 active:bg-green-800 text-white font-semibold
+                     text-sm py-3 rounded-xl shadow-sm transition-colors duration-150
+                     focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">
+        Create Account
+      </button>
+
+    </form>
+
+    <div class="px-6 py-4 bg-slate-50 border-t border-slate-100 text-center">
+      <p class="text-sm text-slate-500">
+        Already have an account?
+        <a href="{{ url_for('login') }}" class="text-green-700 font-semibold hover:underline">Sign in</a>
+      </p>
+    </div>
+  </div>
+
+</div>
+</div>
+{% endblock %}
