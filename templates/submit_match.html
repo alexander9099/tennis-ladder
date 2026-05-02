@@ -158,18 +158,17 @@
           <label for="opponent_id" class="block text-xs font-semibold uppercase tracking-wider text-slate-500">
             Opponent
           </label>
+          {% if challenge_partners %}
           <div class="relative">
             <select id="opponent_id" name="opponent_id" required
                     class="w-full appearance-none bg-white border border-slate-200 rounded-xl px-4 py-3 pr-10
                            text-sm font-medium text-slate-900
                            focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition">
               <option value="" disabled selected>Select your opponent…</option>
-              {% for p in all_players %}
-                {% if p.id != current_user.player_id %}
-                <option value="{{ p.id }}" {% if request.form.opponent_id == p.id|string %}selected{% endif %}>
-                  #{{ p.position }} — {{ p.name }}
-                </option>
-                {% endif %}
+              {% for p in challenge_partners %}
+              <option value="{{ p.id }}" {% if request.form.opponent_id == p.id|string %}selected{% endif %}>
+                #{{ p.position }} — {{ p.name }}
+              </option>
               {% endfor %}
             </select>
             <div class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-400">
@@ -178,6 +177,18 @@
               </svg>
             </div>
           </div>
+          {% else %}
+          <div class="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            <svg class="w-5 h-5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+            </svg>
+            <p class="text-sm text-amber-800">
+              You have no active challenges.
+              <a href="{{ url_for('index') }}" class="font-semibold underline">Challenge a player first →</a>
+            </p>
+          </div>
+          {% endif %}
         </div>
 
         {% endif %}

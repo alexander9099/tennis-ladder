@@ -166,18 +166,27 @@
         </span>
 
       {% elif state == 'out_pending' %}
-        <span class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold
-                     bg-amber-50 text-amber-700 border border-amber-200 select-none">
-          <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
-          Pending
-        </span>
+        <form method="POST"
+              action="{{ url_for('cancel_challenge', challenge_id=challenge_ids[p.id]) }}"
+              onsubmit="return confirm('Withdraw your challenge to {{ p.name }}?')">
+          <button type="submit"
+                  class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold
+                         bg-slate-100 hover:bg-red-50 text-slate-500 hover:text-red-600
+                         border border-slate-200 hover:border-red-200 transition-colors duration-150">
+            Withdraw
+          </button>
+        </form>
 
       {% elif state == 'out_accepted' %}
-        <span class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold
-                     bg-blue-50 text-blue-700 border border-blue-200 select-none">
-          <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
-          Accepted
-        </span>
+        <a href="{{ url_for('submit_match', challenge=challenge_ids[p.id]) }}"
+           class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+                  bg-blue-600 hover:bg-blue-500 text-white transition-colors duration-150">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+          </svg>
+          Submit Result
+        </a>
 
       {% elif state == 'in_pending' %}
         <a href="{{ url_for('challenges') }}"
@@ -190,10 +199,14 @@
         </a>
 
       {% elif state == 'in_accepted' %}
-        <a href="{{ url_for('challenges') }}"
-           class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold
-                  bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors duration-150">
-          View Match
+        <a href="{{ url_for('submit_match', challenge=challenge_ids[p.id]) }}"
+           class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+                  bg-blue-600 hover:bg-blue-500 text-white transition-colors duration-150">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+          </svg>
+          Submit Result
         </a>
 
       {% endif %}

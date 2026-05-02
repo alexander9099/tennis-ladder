@@ -301,24 +301,31 @@ def expire_stale_challenges(conn: _Conn):
         conn.commit()
 
 
-def get_challenge_states(conn: _Conn, player_id: int, players: list) -> dict:
+def get_challenge_states(conn: _Conn, player_id: int, players: list) -> tuple:
     """
-    Returns a dict mapping each player's id to one of:
-      'self' | 'out_of_range' | 'available' | 'ineligible' | 'maxed'
-      | 'out_pending' | 'out_accepted' | 'in_pending' | 'in_accepted'
+    Returns (state_dict, challenge_id_dict).
+    state_dict      — player_id → state string
+    challenge_id_dict — other_player_id → challenge_id for every active challenge I'm in
     """
     active = conn.execute("""
-        SELECT challenger_id, challenged_id, status FROM challenges
+        SELECT id, challenger_id, challenged_id, status FROM challenges
         WHERE status IN ('pending', 'accepted')
     """).fetchall()
 
-    # Players who already have ONE incoming active challenge (from anyone)
     occupied = {r["challenged_id"] for r in active}
 
     my_out = {r["challenged_id"]: r["status"]
               for r in active if r["challenger_id"] == player_id}
     my_in  = {r["challenger_id"]: r["status"]
               for r in active if r["challenged_id"] == player_id}
+
+    # Map the OTHER player's id → challenge id (used by buttons in the template)
+    challenge_ids = {}
+    for r in active:
+        if r["challenger_id"] == player_id:
+            challenge_ids[r["challenged_id"]] = r["id"]
+        elif r["challenged_id"] == player_id:
+            challenge_ids[r["challenger_id"]] = r["id"]
 
     my_pos = next(p["position"] for p in players if p["id"] == player_id)
     outgoing_count = len(my_out)
@@ -346,7 +353,7 @@ def get_challenge_states(conn: _Conn, player_id: int, players: list) -> dict:
             continue
         state[pid] = "available"
 
-    return state
+    return state, challenge_ids
 
 
 # ── Context processor ──────────────────────────────────────────────────────────
@@ -375,21 +382,24 @@ def index():
     expire_stale_challenges(conn)
     players = conn.execute("SELECT * FROM players ORDER BY position").fetchall()
 
-    challenge_state    = {}
+    challenge_state     = {}
+    challenge_ids       = {}
     user_outgoing_count = 0
 
     if current_user.is_authenticated and current_user.player_id:
-        challenge_state    = get_challenge_states(conn, current_user.player_id, players)
-        active             = conn.execute("""
+        challenge_state, challenge_ids = get_challenge_states(
+            conn, current_user.player_id, players
+        )
+        user_outgoing_count = conn.execute("""
             SELECT COUNT(*) AS n FROM challenges
             WHERE challenger_id = %s AND status IN ('pending', 'accepted')
         """, (current_user.player_id,)).fetchone()["n"]
-        user_outgoing_count = active
 
     conn.close()
     return render_template("index.html",
                            players=players,
                            challenge_state=challenge_state,
+                           challenge_ids=challenge_ids,
                            user_outgoing_count=user_outgoing_count)
 
 
@@ -530,6 +540,19 @@ def submit_match():
     conn = get_db()
     all_players = conn.execute("SELECT * FROM players ORDER BY position").fetchall()
 
+    # Non-admin players only see opponents they have an active challenge with
+    if not current_user.is_admin and current_user.player_id:
+        challenge_partners = conn.execute("""
+            SELECT DISTINCT p.* FROM players p
+            JOIN challenges c
+              ON (c.challenger_id = %s AND c.challenged_id = p.id)
+              OR (c.challenged_id = %s AND c.challenger_id = p.id)
+            WHERE c.status IN ('pending', 'accepted')
+            ORDER BY p.position
+        """, (current_user.player_id, current_user.player_id)).fetchall()
+    else:
+        challenge_partners = all_players
+
     # Pre-populate from an accepted challenge link (?challenge=<id>)
     linked_challenge = None
     cid = request.args.get("challenge")
@@ -576,6 +599,7 @@ def submit_match():
             conn.close()
             return render_template("submit_match.html",
                                    all_players=all_players,
+                                   challenge_partners=challenge_partners,
                                    linked_challenge=linked_challenge)
 
         update_ladder(conn, int(winner_id), int(loser_id))
