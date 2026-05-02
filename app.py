@@ -187,7 +187,7 @@ def init_db():
         )
     """)
     # Sync wildcard status with actual match counts for existing players
-    conn.execute("UPDATE players SET wildcard_available = ((wins + losses) % 3 = 0)")
+    conn.execute("UPDATE players SET wildcard_available = ((wins + losses) %% 3 = 0)")
 
     # Seed admin
     if conn.execute(
