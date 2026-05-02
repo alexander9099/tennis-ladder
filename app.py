@@ -588,10 +588,10 @@ def submit_match():
         """, (winner_id, loser_id, score,
               datetime.now().strftime("%Y-%m-%d %H:%M"), current_user.id)).fetchone()["id"]
 
-        # Auto-close any accepted challenge between these two players
+        # Auto-close any active challenge between these two players
         conn.execute("""
             UPDATE challenges SET status = 'completed', match_id = %s
-            WHERE status = 'accepted'
+            WHERE status IN ('pending', 'accepted')
               AND ((challenger_id = %s AND challenged_id = %s)
                 OR (challenger_id = %s AND challenged_id = %s))
         """, (match_id, winner_id, loser_id, loser_id, winner_id))
