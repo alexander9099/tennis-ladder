@@ -172,14 +172,6 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_chal_challenged ON challenges(challenged_id)"
     )
 
-    # Seed players
-    if conn.execute("SELECT COUNT(*) AS n FROM players").fetchone()["n"] == 0:
-        for pos, name in enumerate([
-            "Alex Rodriguez", "Sarah Mitchell", "James Chen", "Emma Thompson",
-            "Marcus Williams", "Olivia Davis", "Ryan Park", "Sophia Martinez",
-        ], start=1):
-            conn.execute("INSERT INTO players (name, position) VALUES (%s, %s)", (name, pos))
-
     # Seed admin
     if conn.execute(
         "SELECT COUNT(*) AS n FROM users WHERE username = 'admin'"
@@ -210,12 +202,12 @@ def send_challenge_email(to_email: str, to_name: str, challenger_name: str, base
     html = f"""
     <div style="font-family:sans-serif;max-width:480px;margin:0 auto;">
       <div style="background:#166534;padding:20px 24px;border-radius:12px 12px 0 0;">
-        <h1 style="color:white;margin:0;font-size:20px;">🎾 Tennis Ladder</h1>
+        <h1 style="color:white;margin:0;font-size:20px;">🎾 OA Summer Tennis Ladder</h1>
       </div>
       <div style="background:#ffffff;padding:28px 24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
         <p style="margin:0 0 12px;color:#111827;">Hi <strong>{to_name}</strong>,</p>
         <p style="margin:0 0 20px;color:#374151;">
-          <strong>{challenger_name}</strong> has challenged you on the Tennis Ladder.
+          <strong>{challenger_name}</strong> has challenged you on the OA Summer Tennis Ladder.
           You have <strong>{RESPOND_DAYS} days</strong> to accept or decline —
           if you don't respond the match will be awarded to your challenger.
         </p>
@@ -225,7 +217,7 @@ def send_challenge_email(to_email: str, to_name: str, challenger_name: str, base
           View &amp; Respond →
         </a>
         <p style="margin:24px 0 0;color:#9ca3af;font-size:12px;">
-          You're receiving this because your account is registered on Tennis Ladder.
+          You're receiving this because your account is registered on OA Summer Tennis Ladder.
         </p>
       </div>
     </div>
@@ -236,7 +228,7 @@ def send_challenge_email(to_email: str, to_name: str, challenger_name: str, base
         msg = SGMail(
             from_email=from_addr,
             to_emails=to_email,
-            subject=f"🎾 {challenger_name} has challenged you on the Tennis Ladder",
+            subject=f"🎾 {challenger_name} has challenged you on the OA Summer Tennis Ladder",
             html_content=html,
         )
         SendGridAPIClient(api_key).send(msg)
@@ -401,6 +393,11 @@ def index():
                            challenge_state=challenge_state,
                            challenge_ids=challenge_ids,
                            user_outgoing_count=user_outgoing_count)
+
+
+@app.route("/rules")
+def rules():
+    return render_template("rules.html")
 
 
 @app.route("/history")

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{% block title %}Tennis Ladder{% endblock %}</title>
+  <title>{% block title %}OA Summer Tennis Ladder{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style type="text/tailwindcss">
     @layer utilities {
@@ -25,7 +25,7 @@
       <!-- Logo -->
       <a href="{{ url_for('index') }}" class="flex items-center gap-2 shrink-0">
         <span class="text-xl leading-none">🎾</span>
-        <span class="text-white font-bold text-base sm:text-lg tracking-tight">Tennis Ladder</span>
+        <span class="text-white font-bold text-base sm:text-lg tracking-tight">OA Summer Tennis Ladder</span>
       </a>
 
       <!-- Right side -->
@@ -82,6 +82,17 @@
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                       d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </span>
+          </a>
+
+          <a href="{{ url_for('rules') }}"
+             class="nav-link {{ 'active' if request.endpoint == 'rules' }}">
+            <span class="hidden sm:inline">Rules</span>
+            <span class="sm:hidden" title="Rules">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
               </svg>
             </span>
           </a>
@@ -169,7 +180,7 @@
 
   <footer class="border-t border-slate-200 bg-white mt-4">
     <div class="max-w-4xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-400">
-      <span>🎾 Tennis Ladder</span>
+      <span>🎾 OA Summer Tennis Ladder</span>
       {% if current_user.is_authenticated %}
         <span>Signed in as <strong class="text-slate-600">{{ current_user.username }}</strong>{% if current_user.is_admin %} <span class="text-amber-500">★ admin</span>{% endif %}</span>
       {% else %}

@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Rules — OA Summer Tennis Ladder{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-slate-900">Ladder Rules</h1>
+    <p class="text-sm text-slate-500 mt-0.5">OA Summer Tennis Ladder — official rules &amp; guidelines</p>
+  </div>
+
+  <!-- Section: The Ladder -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-4">
+    <div class="bg-green-700 px-5 py-3 flex items-center gap-2">
+      <span class="text-white text-base">📋</span>
+      <h2 class="text-sm font-bold text-white uppercase tracking-wider">The Ladder</h2>
+    </div>
+    <ul class="divide-y divide-slate-100">
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">1.</span>
+        The ladder is a ranking system where players compete to move up the rankings by challenging and beating higher-ranked players.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">2.</span>
+        Players may only challenge opponents within <strong>10 positions</strong> above or below their current ranking.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">3.</span>
+        If the <strong>winner is ranked lower</strong> than the loser, the winner moves up to the loser's position and everyone in between shifts down one place.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">4.</span>
+        If the <strong>winner is already ranked higher</strong> than the loser, positions remain unchanged.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">5.</span>
+        You may have a maximum of <strong>2 outgoing challenges</strong> active at any one time.
+      </li>
+    </ul>
+  </div>
+
+  <!-- Section: Challenges -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-4">
+    <div class="bg-green-700 px-5 py-3 flex items-center gap-2">
+      <span class="text-white text-base">⚡</span>
+      <h2 class="text-sm font-bold text-white uppercase tracking-wider">Challenges</h2>
+    </div>
+    <ul class="divide-y divide-slate-100">
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">1.</span>
+        Challenges are sent through the website. The challenged player will receive an email notification.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">2.</span>
+        The challenged player must <strong>accept or decline within 3 days</strong>. Failure to respond will result in a walkover win for the challenger and a position change.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">3.</span>
+        Once a challenge is accepted, the match must be <strong>played within 10 days</strong>. If the match is not played in time, the challenge expires with no position change.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">4.</span>
+        A player cannot be challenged if they already have an active incoming challenge — challenge the same player again once their current challenge is resolved.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">5.</span>
+        You may cancel a pending outgoing challenge before it is accepted, but you cannot cancel once the opponent has accepted.
+      </li>
+    </ul>
+  </div>
+
+  <!-- Section: Match Format -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-4">
+    <div class="bg-green-700 px-5 py-3 flex items-center gap-2">
+      <span class="text-white text-base">🎾</span>
+      <h2 class="text-sm font-bold text-white uppercase tracking-wider">Match Format</h2>
+    </div>
+    <ul class="divide-y divide-slate-100">
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">1.</span>
+        Matches are played as <strong>best of 3 sets</strong>. Standard tennis scoring applies.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">2.</span>
+        A <strong>tie-break</strong> (first to 7 points, with a 2-point lead) is played at 6-6 in each set.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">3.</span>
+        If a deciding third set is required, it may be played as a full set or a match tie-break (first to 10 points) — players must agree before the match begins.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">4.</span>
+        Players are responsible for organising the time and venue of their match between themselves.
+      </li>
+    </ul>
+  </div>
+
+  <!-- Section: Submitting Results -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-4">
+    <div class="bg-green-700 px-5 py-3 flex items-center gap-2">
+      <span class="text-white text-base">✅</span>
+      <h2 class="text-sm font-bold text-white uppercase tracking-wider">Submitting Results</h2>
+    </div>
+    <ul class="divide-y divide-slate-100">
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">1.</span>
+        Either player may submit the result through the website using the <strong>Submit Result</strong> page.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">2.</span>
+        The score must be entered in the format <strong>6-4 6-2</strong> or <strong>7-5 3-6 6-3</strong> — one set per group, separated by spaces.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">3.</span>
+        Submitting a result will automatically close the challenge and update the ladder positions.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">4.</span>
+        Results should be submitted promptly after the match is played — please do not leave results unsubmitted.
+      </li>
+    </ul>
+  </div>
+
+  <!-- Section: Conduct -->
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-4">
+    <div class="bg-green-700 px-5 py-3 flex items-center gap-2">
+      <span class="text-white text-base">🤝</span>
+      <h2 class="text-sm font-bold text-white uppercase tracking-wider">Code of Conduct</h2>
+    </div>
+    <ul class="divide-y divide-slate-100">
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">1.</span>
+        All players are expected to play in a <strong>fair and sporting manner</strong>. Respect your opponent and the spirit of the game.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">2.</span>
+        Players must call lines honestly. In the event of a disputed call, the point should be replayed.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">3.</span>
+        Be punctual and responsive. Ignoring challenges or being uncontactable is not acceptable.
+      </li>
+      <li class="px-5 py-3.5 flex gap-3 text-sm text-slate-700">
+        <span class="text-green-500 mt-0.5 shrink-0 font-bold">4.</span>
+        Any disputes should be raised with the ladder administrator.
+      </li>
+    </ul>
+  </div>
+
+  <!-- Quick reference strip -->
+  <div class="bg-green-50 border border-green-100 rounded-2xl px-5 py-4 mt-2 grid sm:grid-cols-3 gap-4 text-sm text-green-800">
+    <div class="flex items-start gap-2">
+      <span class="text-green-500 mt-0.5 text-base leading-none">📍</span>
+      <span>Challenge players within <strong>±10 positions</strong></span>
+    </div>
+    <div class="flex items-start gap-2">
+      <span class="text-green-500 mt-0.5 text-base leading-none">⏱</span>
+      <span>Respond within <strong>3 days</strong> or forfeit</span>
+    </div>
+    <div class="flex items-start gap-2">
+      <span class="text-green-500 mt-0.5 text-base leading-none">🎾</span>
+      <span>Play within <strong>10 days</strong> of accepting</span>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
