@@ -35,7 +35,7 @@ login_manager.login_view = "login"
 login_manager.login_message = "Please log in to access that page."
 login_manager.login_message_category = "error"
 
-CHALLENGE_RANGE        = 10   # positions either side you can challenge
+CHALLENGE_RANGE        = 5    # positions either side you can challenge
 MAX_OUTGOING           = 2    # max simultaneous outgoing challenges
 RESPOND_DAYS           = 3    # days to accept/decline before forfeit
 PLAY_DAYS              = 10   # days to play after accepting
