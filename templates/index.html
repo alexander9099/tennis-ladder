@@ -48,13 +48,13 @@
 
   <!-- Table header -->
   {% set show_challenge_col = current_user.is_authenticated and current_user.player_id %}
-  <div class="grid {{ 'grid-cols-[2.5rem_1fr_5.5rem_2.5rem_8rem] sm:grid-cols-[3.5rem_1fr_6rem_7rem_3rem_9rem]' if show_challenge_col else 'grid-cols-[2.5rem_1fr_5.5rem_2.5rem] sm:grid-cols-[3.5rem_1fr_6rem_7rem_3rem]' }}
+  <div class="grid {{ 'grid-cols-[2.5rem_1fr_5rem_8rem] sm:grid-cols-[3.5rem_1fr_6rem_7rem_3rem_9rem]' if show_challenge_col else 'grid-cols-[2.5rem_1fr_5rem] sm:grid-cols-[3.5rem_1fr_6rem_7rem_3rem]' }}
               items-center px-4 sm:px-6 py-3 border-b border-slate-100 bg-slate-50">
     <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">#</span>
     <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Player</span>
     <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider text-center">Record</span>
     <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider text-center hidden sm:block">Win %</span>
-    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider text-center">Trend</span>
+    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider text-center hidden sm:block">Trend</span>
     {% if show_challenge_col %}
     <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider text-center">Challenge</span>
     {% endif %}
@@ -75,7 +75,7 @@
 
   {% set state = challenge_state.get(p.id, "") %}
 
-  <div class="grid {{ 'grid-cols-[3.5rem_1fr_6rem_7rem_3rem_9rem]' if show_challenge_col else 'grid-cols-[3.5rem_1fr_6rem_7rem_3rem]' }}
+  <div class="grid {{ 'grid-cols-[2.5rem_1fr_5rem_8rem] sm:grid-cols-[3.5rem_1fr_6rem_7rem_3rem_9rem]' if show_challenge_col else 'grid-cols-[2.5rem_1fr_5rem] sm:grid-cols-[3.5rem_1fr_6rem_7rem_3rem]' }}
               items-center px-4 sm:px-6 py-4
               {{ 'bg-amber-50/60' if p.position == 1 }}
               {{ '' if loop.last else 'border-b border-slate-100' }}
@@ -125,7 +125,7 @@
     </div>
 
     <!-- Trend -->
-    <div class="flex justify-center">
+    <div class="hidden sm:flex justify-center">
       {% if trend == 'up' %}
         <span title="Moved up from #{{ p.prev_position }}"
               class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-600">
