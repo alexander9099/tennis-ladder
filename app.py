@@ -1,6 +1,6 @@
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 
 import bcrypt as _bcrypt
@@ -17,7 +17,6 @@ from flask_login import (
     logout_user,
 )
 
-# Load .env in development (no-op if python-dotenv isn't installed or file missing)
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -36,12 +35,16 @@ login_manager.login_view = "login"
 login_manager.login_message = "Please log in to access that page."
 login_manager.login_message_category = "error"
 
+CHALLENGE_RANGE        = 10   # positions either side you can challenge
+MAX_OUTGOING           = 2    # max simultaneous outgoing challenges
+RESPOND_DAYS           = 3    # days to accept/decline before forfeit
+PLAY_DAYS              = 10   # days to play after accepting
+
 
 # ── Password helpers ───────────────────────────────────────────────────────────
 
 def hash_password(password: str) -> str:
     return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
-
 
 def verify_password(password: str, hashed: str) -> bool:
     return _bcrypt.checkpw(password.encode(), hashed.encode())
@@ -56,7 +59,6 @@ class User(UserMixin):
         self.email     = row["email"]
         self.player_id = row["player_id"]
         self.is_admin  = bool(row["is_admin"])
-
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -83,10 +85,7 @@ def admin_required(f):
 # ── DB connection ──────────────────────────────────────────────────────────────
 
 class _Conn:
-    """
-    Thin shim that makes psycopg2 look like sqlite3 for simple execute chains.
-    Lets us write conn.execute(sql, params).fetchone() throughout the codebase.
-    """
+    """Thin shim making psycopg2 chainable like sqlite3 (conn.execute().fetchone())."""
     def __init__(self, pg_conn):
         self._c = pg_conn
 
@@ -102,20 +101,16 @@ class _Conn:
 
 def get_db() -> _Conn:
     if not DATABASE_URL:
-        raise RuntimeError(
-            "DATABASE_URL is not set. "
-            "Add it to your .env file (local) or Render environment variables (production)."
-        )
-    pg = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
-    return _Conn(pg)
+        raise RuntimeError("DATABASE_URL is not set.")
+    return _Conn(psycopg2.connect(DATABASE_URL,
+                                  cursor_factory=psycopg2.extras.RealDictCursor))
 
 
-# ── Schema + seeding ───────────────────────────────────────────────────────────
+# ── Schema & seeding ───────────────────────────────────────────────────────────
 
 def init_db():
     conn = get_db()
 
-    # PostgreSQL: SERIAL = auto-increment integer PK; IF NOT EXISTS on ADD COLUMN is native
     conn.execute("""
         CREATE TABLE IF NOT EXISTS players (
             id            SERIAL PRIMARY KEY,
@@ -154,20 +149,41 @@ def init_db():
         "ALTER TABLE matches ADD COLUMN IF NOT EXISTS submitted_by INTEGER REFERENCES users(id)"
     )
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS challenges (
+            id               SERIAL PRIMARY KEY,
+            challenger_id    INTEGER NOT NULL REFERENCES players(id),
+            challenged_id    INTEGER NOT NULL REFERENCES players(id),
+            status           TEXT NOT NULL DEFAULT 'pending',
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            responded_at     TIMESTAMPTZ,
+            deadline_respond TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '3 days',
+            deadline_play    TIMESTAMPTZ,
+            match_id         INTEGER REFERENCES matches(id)
+        )
+    """)
+    conn.execute(
+        "ALTER TABLE challenges ADD COLUMN IF NOT EXISTS match_id INTEGER REFERENCES matches(id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chal_challenger ON challenges(challenger_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chal_challenged ON challenges(challenged_id)"
+    )
+
     # Seed players
-    if conn.execute("SELECT COUNT(*) AS cnt FROM players").fetchone()["cnt"] == 0:
+    if conn.execute("SELECT COUNT(*) AS n FROM players").fetchone()["n"] == 0:
         for pos, name in enumerate([
             "Alex Rodriguez", "Sarah Mitchell", "James Chen", "Emma Thompson",
             "Marcus Williams", "Olivia Davis", "Ryan Park", "Sophia Martinez",
         ], start=1):
-            conn.execute(
-                "INSERT INTO players (name, position) VALUES (%s, %s)", (name, pos)
-            )
+            conn.execute("INSERT INTO players (name, position) VALUES (%s, %s)", (name, pos))
 
-    # Seed admin account
+    # Seed admin
     if conn.execute(
-        "SELECT COUNT(*) AS cnt FROM users WHERE username = 'admin'"
-    ).fetchone()["cnt"] == 0:
+        "SELECT COUNT(*) AS n FROM users WHERE username = 'admin'"
+    ).fetchone()["n"] == 0:
         admin_pw = os.environ.get("ADMIN_PASSWORD", "admin123")
         conn.execute(
             "INSERT INTO users (username, email, password_hash, player_id, is_admin) "
@@ -180,17 +196,63 @@ def init_db():
     conn.close()
 
 
+# ── Email ──────────────────────────────────────────────────────────────────────
+
+def send_challenge_email(to_email: str, to_name: str, challenger_name: str, base_url: str):
+    """Notify challenged player via SendGrid. Silent no-op if API key not set."""
+    api_key   = os.environ.get("SENDGRID_API_KEY")
+    from_addr = os.environ.get("FROM_EMAIL", "noreply@example.com")
+
+    if not api_key:
+        app.logger.info(f"[email] No SENDGRID_API_KEY — skipping notification to {to_email}")
+        return
+
+    html = f"""
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;">
+      <div style="background:#166534;padding:20px 24px;border-radius:12px 12px 0 0;">
+        <h1 style="color:white;margin:0;font-size:20px;">🎾 Tennis Ladder</h1>
+      </div>
+      <div style="background:#ffffff;padding:28px 24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
+        <p style="margin:0 0 12px;color:#111827;">Hi <strong>{to_name}</strong>,</p>
+        <p style="margin:0 0 20px;color:#374151;">
+          <strong>{challenger_name}</strong> has challenged you on the Tennis Ladder.
+          You have <strong>{RESPOND_DAYS} days</strong> to accept or decline —
+          if you don't respond the match will be awarded to your challenger.
+        </p>
+        <a href="{base_url}challenges"
+           style="display:inline-block;background:#166534;color:white;text-decoration:none;
+                  padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">
+          View &amp; Respond →
+        </a>
+        <p style="margin:24px 0 0;color:#9ca3af;font-size:12px;">
+          You're receiving this because your account is registered on Tennis Ladder.
+        </p>
+      </div>
+    </div>
+    """
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helper.mail import Mail as SGMail
+        msg = SGMail(
+            from_email=from_addr,
+            to_emails=to_email,
+            subject=f"🎾 {challenger_name} has challenged you on the Tennis Ladder",
+            html_content=html,
+        )
+        SendGridAPIClient(api_key).send(msg)
+    except Exception as exc:
+        app.logger.error(f"SendGrid error: {exc}")
+
+
 # ── Ladder logic ───────────────────────────────────────────────────────────────
 
 def update_ladder(conn: _Conn, winner_id: int, loser_id: int):
     """Promote winner to loser's spot when winner is currently ranked lower."""
     winner = conn.execute("SELECT position FROM players WHERE id = %s", (winner_id,)).fetchone()
     loser  = conn.execute("SELECT position FROM players WHERE id = %s", (loser_id,)).fetchone()
-
     w_pos, l_pos = winner["position"], loser["position"]
     if w_pos <= l_pos:
-        return  # Already ranked higher — no change
-
+        return
     conn.execute(
         "UPDATE players SET prev_position = position WHERE position >= %s AND position <= %s",
         (l_pos, w_pos),
@@ -202,27 +264,142 @@ def update_ladder(conn: _Conn, winner_id: int, loser_id: int):
     conn.execute("UPDATE players SET position = %s WHERE id = %s", (l_pos, winner_id))
 
 
+# ── Challenge helpers ──────────────────────────────────────────────────────────
+
+def expire_stale_challenges(conn: _Conn):
+    """
+    Pending past their 3-day response deadline → forfeit (challenger wins).
+    Accepted past their 10-day play deadline   → expired (no position change).
+    """
+    # ── Forfeits: no response ──────────────────────────────────────────────────
+    forfeits = conn.execute("""
+        SELECT id, challenger_id, challenged_id FROM challenges
+        WHERE status = 'pending' AND deadline_respond < NOW()
+    """).fetchall()
+
+    for ch in forfeits:
+        update_ladder(conn, ch["challenger_id"], ch["challenged_id"])
+        conn.execute("UPDATE players SET wins   = wins   + 1 WHERE id = %s", (ch["challenger_id"],))
+        conn.execute("UPDATE players SET losses = losses + 1 WHERE id = %s", (ch["challenged_id"],))
+        mid = conn.execute("""
+            INSERT INTO matches (winner_id, loser_id, score, played_at)
+            VALUES (%s, %s, 'Walkover (no response)', %s) RETURNING id
+        """, (ch["challenger_id"], ch["challenged_id"],
+              datetime.now().strftime("%Y-%m-%d %H:%M"))).fetchone()["id"]
+        conn.execute(
+            "UPDATE challenges SET status = 'forfeited', match_id = %s WHERE id = %s",
+            (mid, ch["id"]),
+        )
+
+    # ── Expired: accepted but never played ────────────────────────────────────
+    conn.execute("""
+        UPDATE challenges SET status = 'expired'
+        WHERE status = 'accepted' AND deadline_play < NOW()
+    """)
+
+    if forfeits:
+        conn.commit()
+
+
+def get_challenge_states(conn: _Conn, player_id: int, players: list) -> dict:
+    """
+    Returns a dict mapping each player's id to one of:
+      'self' | 'out_of_range' | 'available' | 'ineligible' | 'maxed'
+      | 'out_pending' | 'out_accepted' | 'in_pending' | 'in_accepted'
+    """
+    active = conn.execute("""
+        SELECT challenger_id, challenged_id, status FROM challenges
+        WHERE status IN ('pending', 'accepted')
+    """).fetchall()
+
+    # Players who already have ONE incoming active challenge (from anyone)
+    occupied = {r["challenged_id"] for r in active}
+
+    my_out = {r["challenged_id"]: r["status"]
+              for r in active if r["challenger_id"] == player_id}
+    my_in  = {r["challenger_id"]: r["status"]
+              for r in active if r["challenged_id"] == player_id}
+
+    my_pos = next(p["position"] for p in players if p["id"] == player_id)
+    outgoing_count = len(my_out)
+
+    state = {}
+    for p in players:
+        pid = p["id"]
+        if pid == player_id:
+            state[pid] = "self"
+            continue
+        if pid in my_out:
+            state[pid] = f"out_{my_out[pid]}"    # out_pending | out_accepted
+            continue
+        if pid in my_in:
+            state[pid] = f"in_{my_in[pid]}"       # in_pending  | in_accepted
+            continue
+        if abs(p["position"] - my_pos) > CHALLENGE_RANGE:
+            state[pid] = "out_of_range"
+            continue
+        if pid in occupied:
+            state[pid] = "ineligible"
+            continue
+        if outgoing_count >= MAX_OUTGOING:
+            state[pid] = "maxed"
+            continue
+        state[pid] = "available"
+
+    return state
+
+
+# ── Context processor ──────────────────────────────────────────────────────────
+
+@app.context_processor
+def inject_pending_count():
+    count = 0
+    if current_user.is_authenticated and current_user.player_id:
+        try:
+            conn = get_db()
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM challenges WHERE challenged_id = %s AND status = 'pending'",
+                (current_user.player_id,),
+            ).fetchone()["n"]
+            conn.close()
+        except Exception:
+            pass
+    return {"pending_challenge_count": count}
+
+
 # ── Routes: public ─────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
     conn = get_db()
+    expire_stale_challenges(conn)
     players = conn.execute("SELECT * FROM players ORDER BY position").fetchall()
+
+    challenge_state    = {}
+    user_outgoing_count = 0
+
+    if current_user.is_authenticated and current_user.player_id:
+        challenge_state    = get_challenge_states(conn, current_user.player_id, players)
+        active             = conn.execute("""
+            SELECT COUNT(*) AS n FROM challenges
+            WHERE challenger_id = %s AND status IN ('pending', 'accepted')
+        """, (current_user.player_id,)).fetchone()["n"]
+        user_outgoing_count = active
+
     conn.close()
-    return render_template("index.html", players=players)
+    return render_template("index.html",
+                           players=players,
+                           challenge_state=challenge_state,
+                           user_outgoing_count=user_outgoing_count)
 
 
 @app.route("/history")
 def history():
     conn = get_db()
     matches = conn.execute("""
-        SELECT
-            m.id,
-            m.score,
-            m.played_at,
-            w.name     AS winner_name,
-            l.name     AS loser_name,
-            u.username AS submitted_by
+        SELECT m.id, m.score, m.played_at,
+               w.name AS winner_name, l.name AS loser_name,
+               u.username AS submitted_by
         FROM matches m
         JOIN  players w ON w.id = m.winner_id
         JOIN  players l ON l.id = m.loser_id
@@ -264,11 +441,10 @@ def register():
         if password != confirm:
             errors.append("Passwords do not match.")
 
-        if not errors:
-            if conn.execute(
-                "SELECT id FROM users WHERE username = %s OR email = %s", (username, email)
-            ).fetchone():
-                errors.append("That username or email is already registered.")
+        if not errors and conn.execute(
+            "SELECT id FROM users WHERE username = %s OR email = %s", (username, email)
+        ).fetchone():
+            errors.append("That username or email is already registered.")
 
         if errors:
             for msg in errors:
@@ -302,7 +478,6 @@ def register():
                 (username, email, hash_password(password), player_id),
             )
             conn.commit()
-
         except psycopg2.IntegrityError:
             conn.rollback()
             conn.close()
@@ -325,18 +500,15 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-
         conn = get_db()
-        row = conn.execute("SELECT * FROM users WHERE username = %s", (username,)).fetchone()
+        row  = conn.execute("SELECT * FROM users WHERE username = %s", (username,)).fetchone()
         conn.close()
-
         if row and verify_password(password, row["password_hash"]):
             login_user(User(row), remember=bool(request.form.get("remember")))
-            next_page = request.args.get("next", "")
-            if next_page and next_page.startswith("/") and not next_page.startswith("//"):
-                return redirect(next_page)
+            nxt = request.args.get("next", "")
+            if nxt and nxt.startswith("/") and not nxt.startswith("//"):
+                return redirect(nxt)
             return redirect(url_for("index"))
-
         flash("Invalid username or password.", "error")
 
     return render_template("auth/login.html")
@@ -358,6 +530,19 @@ def submit_match():
     conn = get_db()
     all_players = conn.execute("SELECT * FROM players ORDER BY position").fetchall()
 
+    # Pre-populate from an accepted challenge link (?challenge=<id>)
+    linked_challenge = None
+    cid = request.args.get("challenge")
+    if cid and current_user.player_id:
+        linked_challenge = conn.execute("""
+            SELECT c.*, pc.name AS challenger_name, pp.name AS challenged_name
+            FROM challenges c
+            JOIN players pc ON pc.id = c.challenger_id
+            JOIN players pp ON pp.id = c.challenged_id
+            WHERE c.id = %s AND c.status = 'accepted'
+              AND (c.challenger_id = %s OR c.challenged_id = %s)
+        """, (cid, current_user.player_id, current_user.player_id)).fetchone()
+
     if request.method == "POST":
         score = request.form.get("score", "").strip()
 
@@ -367,10 +552,11 @@ def submit_match():
         else:
             result      = request.form.get("result")
             opponent_id = request.form.get("opponent_id")
-            if result == "win":
-                winner_id, loser_id = str(current_user.player_id), opponent_id
-            else:
-                winner_id, loser_id = opponent_id, str(current_user.player_id)
+            winner_id, loser_id = (
+                (str(current_user.player_id), opponent_id)
+                if result == "win"
+                else (opponent_id, str(current_user.player_id))
+            )
 
         errors = []
         if not winner_id or not loser_id or not score:
@@ -388,24 +574,37 @@ def submit_match():
             for msg in errors:
                 flash(msg, "error")
             conn.close()
-            return render_template("submit_match.html", all_players=all_players)
+            return render_template("submit_match.html",
+                                   all_players=all_players,
+                                   linked_challenge=linked_challenge)
 
         update_ladder(conn, int(winner_id), int(loser_id))
         conn.execute("UPDATE players SET wins   = wins   + 1 WHERE id = %s", (winner_id,))
         conn.execute("UPDATE players SET losses = losses + 1 WHERE id = %s", (loser_id,))
-        conn.execute(
-            "INSERT INTO matches (winner_id, loser_id, score, played_at, submitted_by) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            (winner_id, loser_id, score,
-             datetime.now().strftime("%Y-%m-%d %H:%M"), current_user.id),
-        )
+
+        match_id = conn.execute("""
+            INSERT INTO matches (winner_id, loser_id, score, played_at, submitted_by)
+            VALUES (%s, %s, %s, %s, %s) RETURNING id
+        """, (winner_id, loser_id, score,
+              datetime.now().strftime("%Y-%m-%d %H:%M"), current_user.id)).fetchone()["id"]
+
+        # Auto-close any accepted challenge between these two players
+        conn.execute("""
+            UPDATE challenges SET status = 'completed', match_id = %s
+            WHERE status = 'accepted'
+              AND ((challenger_id = %s AND challenged_id = %s)
+                OR (challenger_id = %s AND challenged_id = %s))
+        """, (match_id, winner_id, loser_id, loser_id, winner_id))
+
         conn.commit()
         conn.close()
         flash("Match result recorded!", "success")
         return redirect(url_for("index"))
 
     conn.close()
-    return render_template("submit_match.html", all_players=all_players)
+    return render_template("submit_match.html",
+                           all_players=all_players,
+                           linked_challenge=linked_challenge)
 
 
 # ── Routes: admin match management ────────────────────────────────────────────
@@ -421,10 +620,8 @@ def edit_match(match_id):
         JOIN players l ON l.id = m.loser_id
         WHERE m.id = %s
     """, (match_id,)).fetchone()
-
     if not match:
-        conn.close()
-        abort(404)
+        conn.close(); abort(404)
 
     if request.method == "POST":
         new_score = request.form.get("score", "").strip()
@@ -446,37 +643,219 @@ def edit_match(match_id):
 def delete_match(match_id):
     conn = get_db()
     match = conn.execute("SELECT * FROM matches WHERE id = %s", (match_id,)).fetchone()
-
     if not match:
-        conn.close()
-        abort(404)
+        conn.close(); abort(404)
 
-    # GREATEST() is PostgreSQL's multi-arg max — not the aggregate MAX()
     conn.execute(
-        "UPDATE players SET wins   = GREATEST(0, wins   - 1) WHERE id = %s",
-        (match["winner_id"],),
+        "UPDATE players SET wins   = GREATEST(0, wins   - 1) WHERE id = %s", (match["winner_id"],)
     )
     conn.execute(
-        "UPDATE players SET losses = GREATEST(0, losses - 1) WHERE id = %s",
-        (match["loser_id"],),
+        "UPDATE players SET losses = GREATEST(0, losses - 1) WHERE id = %s", (match["loser_id"],)
     )
     conn.execute("DELETE FROM matches WHERE id = %s", (match_id,))
     conn.commit()
     conn.close()
-
     flash("Match deleted. Win/loss counts adjusted; ladder positions are unchanged.", "success")
     return redirect(url_for("history"))
 
 
+# ── Routes: challenge system ───────────────────────────────────────────────────
+
+@app.route("/challenges")
+@login_required
+def challenges():
+    if not current_user.player_id:
+        flash("Your account isn't linked to a player profile.", "error")
+        return redirect(url_for("index"))
+
+    conn = get_db()
+    expire_stale_challenges(conn)
+    pid = current_user.player_id
+
+    incoming = conn.execute("""
+        SELECT c.*, pc.name AS challenger_name, pp.name AS challenged_name
+        FROM challenges c
+        JOIN players pc ON pc.id = c.challenger_id
+        JOIN players pp ON pp.id = c.challenged_id
+        WHERE c.challenged_id = %s
+        ORDER BY c.created_at DESC
+    """, (pid,)).fetchall()
+
+    outgoing = conn.execute("""
+        SELECT c.*, pc.name AS challenger_name, pp.name AS challenged_name
+        FROM challenges c
+        JOIN players pc ON pc.id = c.challenger_id
+        JOIN players pp ON pp.id = c.challenged_id
+        WHERE c.challenger_id = %s
+        ORDER BY c.created_at DESC
+    """, (pid,)).fetchall()
+
+    conn.close()
+    now = datetime.now(timezone.utc)
+    return render_template("challenges.html", incoming=incoming, outgoing=outgoing, now=now)
+
+
+@app.route("/challenge/<int:player_id>", methods=["POST"])
+@login_required
+def send_challenge(player_id):
+    if not current_user.player_id:
+        flash("Your account isn't linked to a player profile.", "error")
+        return redirect(url_for("index"))
+
+    conn = get_db()
+    me     = conn.execute("SELECT * FROM players WHERE id = %s", (current_user.player_id,)).fetchone()
+    target = conn.execute("SELECT * FROM players WHERE id = %s", (player_id,)).fetchone()
+
+    if not target or player_id == current_user.player_id:
+        conn.close()
+        flash("Invalid challenge target.", "error")
+        return redirect(url_for("index"))
+
+    if abs(me["position"] - target["position"]) > CHALLENGE_RANGE:
+        conn.close()
+        flash(f"You can only challenge players within {CHALLENGE_RANGE} positions of you.", "error")
+        return redirect(url_for("index"))
+
+    if conn.execute("""
+        SELECT id FROM challenges
+        WHERE challenged_id = %s AND status IN ('pending', 'accepted')
+    """, (player_id,)).fetchone():
+        conn.close()
+        flash(f"{target['name']} is already being challenged.", "error")
+        return redirect(url_for("index"))
+
+    if conn.execute("""
+        SELECT id FROM challenges
+        WHERE challenger_id = %s AND challenged_id = %s AND status IN ('pending', 'accepted')
+    """, (current_user.player_id, player_id)).fetchone():
+        conn.close()
+        flash("You already have an active challenge against that player.", "error")
+        return redirect(url_for("index"))
+
+    outgoing = conn.execute("""
+        SELECT COUNT(*) AS n FROM challenges
+        WHERE challenger_id = %s AND status IN ('pending', 'accepted')
+    """, (current_user.player_id,)).fetchone()["n"]
+
+    if outgoing >= MAX_OUTGOING:
+        conn.close()
+        flash(f"You already have {MAX_OUTGOING} active challenges. "
+              "Wait for one to finish before sending another.", "error")
+        return redirect(url_for("index"))
+
+    conn.execute(
+        "INSERT INTO challenges (challenger_id, challenged_id) VALUES (%s, %s)",
+        (current_user.player_id, player_id),
+    )
+
+    # Fetch the challenged player's email for notification
+    target_user = conn.execute(
+        "SELECT email, username FROM users WHERE player_id = %s", (player_id,)
+    ).fetchone()
+
+    conn.commit()
+    conn.close()
+
+    if target_user:
+        send_challenge_email(
+            to_email=target_user["email"],
+            to_name=target_user["username"],
+            challenger_name=me["name"],
+            base_url=request.host_url,
+        )
+
+    flash(f"Challenge sent to {target['name']}! They have {RESPOND_DAYS} days to respond.", "success")
+    return redirect(url_for("index"))
+
+
+@app.route("/challenge/<int:challenge_id>/accept", methods=["POST"])
+@login_required
+def accept_challenge(challenge_id):
+    if not current_user.player_id:
+        return redirect(url_for("index"))
+
+    conn = get_db()
+    ch = conn.execute("""
+        SELECT c.*, p.name AS challenger_name
+        FROM challenges c JOIN players p ON p.id = c.challenger_id
+        WHERE c.id = %s
+    """, (challenge_id,)).fetchone()
+
+    if not ch or ch["challenged_id"] != current_user.player_id:
+        conn.close(); flash("Challenge not found.", "error"); return redirect(url_for("challenges"))
+    if ch["status"] != "pending":
+        conn.close(); flash("This challenge is no longer pending.", "error"); return redirect(url_for("challenges"))
+
+    conn.execute("""
+        UPDATE challenges
+        SET status = 'accepted', responded_at = NOW(),
+            deadline_play = NOW() + INTERVAL '10 days'
+        WHERE id = %s
+    """, (challenge_id,))
+    conn.commit()
+    conn.close()
+    flash(f"Challenge accepted! You have {PLAY_DAYS} days to play {ch['challenger_name']}.", "success")
+    return redirect(url_for("challenges"))
+
+
+@app.route("/challenge/<int:challenge_id>/decline", methods=["POST"])
+@login_required
+def decline_challenge(challenge_id):
+    if not current_user.player_id:
+        return redirect(url_for("index"))
+
+    conn = get_db()
+    ch = conn.execute("""
+        SELECT c.*, p.name AS challenger_name
+        FROM challenges c JOIN players p ON p.id = c.challenger_id
+        WHERE c.id = %s
+    """, (challenge_id,)).fetchone()
+
+    if not ch or ch["challenged_id"] != current_user.player_id:
+        conn.close(); flash("Challenge not found.", "error"); return redirect(url_for("challenges"))
+    if ch["status"] != "pending":
+        conn.close(); flash("This challenge is no longer pending.", "error"); return redirect(url_for("challenges"))
+
+    conn.execute(
+        "UPDATE challenges SET status = 'declined', responded_at = NOW() WHERE id = %s",
+        (challenge_id,),
+    )
+    conn.commit()
+    conn.close()
+    flash("Challenge declined.", "success")
+    return redirect(url_for("challenges"))
+
+
+@app.route("/challenge/<int:challenge_id>/cancel", methods=["POST"])
+@login_required
+def cancel_challenge(challenge_id):
+    if not current_user.player_id:
+        return redirect(url_for("index"))
+
+    conn = get_db()
+    ch = conn.execute("SELECT * FROM challenges WHERE id = %s", (challenge_id,)).fetchone()
+
+    if not ch or ch["challenger_id"] != current_user.player_id:
+        conn.close(); flash("Challenge not found.", "error"); return redirect(url_for("challenges"))
+    if ch["status"] != "pending":
+        conn.close(); flash("Only pending challenges can be cancelled.", "error"); return redirect(url_for("challenges"))
+
+    conn.execute(
+        "UPDATE challenges SET status = 'cancelled' WHERE id = %s", (challenge_id,)
+    )
+    conn.commit()
+    conn.close()
+    flash("Challenge cancelled.", "success")
+    return redirect(url_for("challenges"))
+
+
 # ── Startup ────────────────────────────────────────────────────────────────────
-# init_db() is idempotent (CREATE IF NOT EXISTS + INSERT IF EMPTY).
-# Called at module load so gunicorn workers initialise the schema on first boot.
 
 if DATABASE_URL:
     init_db()
 
 if __name__ == "__main__":
     if not DATABASE_URL:
-        init_db()  # will raise a clear RuntimeError if DATABASE_URL is still missing
+        init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=True, host="0.0.0.0", port=port)

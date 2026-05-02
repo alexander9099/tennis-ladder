@@ -54,6 +54,25 @@
               </svg>
             </span>
           </a>
+
+          {% if current_user.player_id %}
+          <a href="{{ url_for('challenges') }}"
+             class="nav-link relative {{ 'active' if request.endpoint == 'challenges' }}">
+            <span class="hidden sm:inline">Challenges</span>
+            <span class="sm:hidden" title="Challenges">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+            </span>
+            {% if pending_challenge_count > 0 %}
+            <span class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px]
+                         font-bold rounded-full flex items-center justify-center leading-none">
+              {{ pending_challenge_count }}
+            </span>
+            {% endif %}
+          </a>
+          {% endif %}
           {% endif %}
 
           <a href="{{ url_for('history') }}"

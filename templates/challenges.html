@@ -1,0 +1,325 @@
+{% extends "base.html" %}
+{% block title %}Challenges — Tennis Ladder{% endblock %}
+
+{% block content %}
+
+{# ── Helpers ─────────────────────────────────────────────────────────────── #}
+{% macro days_left(deadline) %}
+  {% if deadline %}
+    {% set secs = (deadline - now).total_seconds() %}
+    {% if secs <= 0 %}
+      <span class="text-red-600 font-semibold">Overdue</span>
+    {% elif secs < 86400 %}
+      <span class="text-orange-600 font-semibold">Due today</span>
+    {% else %}
+      {% set d = (secs / 86400) | int %}
+      <span class="{{ 'text-orange-600' if d <= 2 else 'text-slate-500' }} font-medium">
+        {{ d }} day{{ 's' if d != 1 }} left
+      </span>
+    {% endif %}
+  {% endif %}
+{% endmacro %}
+
+{% macro status_badge(status) %}
+  {% if status == 'completed' %}
+    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+      </svg>
+      Completed
+    </span>
+  {% elif status == 'forfeited' %}
+    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+      Walkover
+    </span>
+  {% elif status == 'declined' %}
+    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">
+      Declined
+    </span>
+  {% elif status == 'expired' %}
+    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">
+      Expired
+    </span>
+  {% elif status == 'cancelled' %}
+    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">
+      Cancelled
+    </span>
+  {% endif %}
+{% endmacro %}
+
+{# ── Active incoming & outgoing ─────────────────────────────────────────── #}
+{% set active_in  = incoming | selectattr('status', 'in', ['pending', 'accepted']) | list %}
+{% set active_out = outgoing | selectattr('status', 'in', ['pending', 'accepted']) | list %}
+{% set hist_in    = incoming | rejectattr('status', 'in', ['pending', 'accepted']) | list %}
+{% set hist_out   = outgoing | rejectattr('status', 'in', ['pending', 'accepted']) | list %}
+
+<div class="mb-6">
+  <h1 class="text-2xl font-bold text-slate-900">My Challenges</h1>
+  <p class="text-sm text-slate-500 mt-0.5">Manage your incoming and outgoing challenges</p>
+</div>
+
+{# ── Rules strip ─────────────────────────────────────────────────────────── #}
+<div class="bg-green-50 border border-green-100 rounded-2xl px-5 py-4 mb-6 grid sm:grid-cols-3 gap-4 text-sm text-green-800">
+  <div class="flex items-start gap-2">
+    <span class="text-green-500 mt-0.5 text-base leading-none">⚡</span>
+    <span>Challenge anyone within <strong>10 positions</strong> of you — up or down</span>
+  </div>
+  <div class="flex items-start gap-2">
+    <span class="text-green-500 mt-0.5 text-base leading-none">⏱</span>
+    <span>Respond within <strong>3 days</strong> or it counts as a forfeit</span>
+  </div>
+  <div class="flex items-start gap-2">
+    <span class="text-green-500 mt-0.5 text-base leading-none">🎾</span>
+    <span>Play within <strong>10 days</strong> of accepting</span>
+  </div>
+</div>
+
+{# ══ Incoming challenges ═════════════════════════════════════════════════ #}
+<section class="mb-8">
+  <h2 class="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
+    <span class="w-2 h-2 rounded-full bg-orange-400"></span>
+    Incoming Challenges
+    {% if active_in %}
+      <span class="ml-1 px-2 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-700">
+        {{ active_in | length }}
+      </span>
+    {% endif %}
+  </h2>
+
+  {% if active_in %}
+  <div class="space-y-3">
+    {% for ch in active_in %}
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden
+                {{ 'border-l-4 border-l-orange-400' if ch.status == 'pending' else 'border-l-4 border-l-blue-400' }}">
+      <div class="px-5 py-4">
+
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+
+          <!-- Who challenged you -->
+          <div>
+            <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
+              {{ 'Awaiting your response' if ch.status == 'pending' else 'Match to be played' }}
+            </p>
+            <p class="font-semibold text-slate-900 text-base">
+              <span class="text-green-700">{{ ch.challenger_name }}</span>
+              <span class="text-slate-400 font-normal mx-1.5">challenged</span>
+              you
+            </p>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Sent {{ ch.created_at.strftime('%d %b %Y') if ch.created_at else '' }}
+            </p>
+          </div>
+
+          <!-- Deadline + actions -->
+          <div class="flex flex-col sm:items-end gap-2.5 shrink-0">
+            <div class="text-xs">
+              {% if ch.status == 'pending' %}
+                Respond by: {{ days_left(ch.deadline_respond) }}
+              {% else %}
+                Play by: {{ days_left(ch.deadline_play) }}
+              {% endif %}
+            </div>
+
+            {% if ch.status == 'pending' %}
+            <div class="flex items-center gap-2">
+              <form method="POST" action="{{ url_for('accept_challenge', challenge_id=ch.id) }}">
+                <button type="submit"
+                        class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold
+                               bg-green-700 hover:bg-green-600 text-white shadow-sm transition-colors duration-150">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                  </svg>
+                  Accept
+                </button>
+              </form>
+              <form method="POST" action="{{ url_for('decline_challenge', challenge_id=ch.id) }}"
+                    onsubmit="return confirm('Decline this challenge?')">
+                <button type="submit"
+                        class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold
+                               bg-white hover:bg-red-50 text-red-600 border border-red-200
+                               shadow-sm transition-colors duration-150">
+                  Decline
+                </button>
+              </form>
+            </div>
+
+            {% elif ch.status == 'accepted' %}
+            <a href="{{ url_for('submit_match', challenge=ch.id) }}"
+               class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold
+                      bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors duration-150">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+              </svg>
+              Submit Result
+            </a>
+            {% endif %}
+          </div>
+        </div>
+
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <div class="bg-white rounded-2xl border border-slate-200 px-5 py-8 text-center text-slate-400 text-sm">
+    No incoming challenges right now.
+  </div>
+  {% endif %}
+</section>
+
+{# ══ Outgoing challenges ═════════════════════════════════════════════════ #}
+<section class="mb-8">
+  <h2 class="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
+    <span class="w-2 h-2 rounded-full bg-green-500"></span>
+    Outgoing Challenges
+    {% if active_out %}
+      <span class="ml-1 px-2 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-700">
+        {{ active_out | length }}
+      </span>
+    {% endif %}
+  </h2>
+
+  {% if active_out %}
+  <div class="space-y-3">
+    {% for ch in active_out %}
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden
+                {{ 'border-l-4 border-l-amber-400' if ch.status == 'pending' else 'border-l-4 border-l-blue-400' }}">
+      <div class="px-5 py-4">
+
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+
+          <!-- Who you challenged -->
+          <div>
+            <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
+              {{ 'Waiting for response' if ch.status == 'pending' else 'Match to be played' }}
+            </p>
+            <p class="font-semibold text-slate-900 text-base">
+              You challenged
+              <span class="text-green-700">{{ ch.challenged_name }}</span>
+            </p>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Sent {{ ch.created_at.strftime('%d %b %Y') if ch.created_at else '' }}
+            </p>
+          </div>
+
+          <!-- Deadline + actions -->
+          <div class="flex flex-col sm:items-end gap-2.5 shrink-0">
+            <div class="text-xs">
+              {% if ch.status == 'pending' %}
+                They must respond: {{ days_left(ch.deadline_respond) }}
+              {% else %}
+                Play by: {{ days_left(ch.deadline_play) }}
+              {% endif %}
+            </div>
+
+            {% if ch.status == 'pending' %}
+            <form method="POST" action="{{ url_for('cancel_challenge', challenge_id=ch.id) }}"
+                  onsubmit="return confirm('Cancel this challenge?')">
+              <button type="submit"
+                      class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold
+                             bg-white hover:bg-slate-100 text-slate-600 border border-slate-200
+                             shadow-sm transition-colors duration-150">
+                Cancel
+              </button>
+            </form>
+
+            {% elif ch.status == 'accepted' %}
+            <a href="{{ url_for('submit_match', challenge=ch.id) }}"
+               class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold
+                      bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors duration-150">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+              </svg>
+              Submit Result
+            </a>
+            {% endif %}
+          </div>
+        </div>
+
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <div class="bg-white rounded-2xl border border-slate-200 px-5 py-8 text-center text-slate-400 text-sm">
+    You haven't sent any challenges yet.
+    <a href="{{ url_for('index') }}" class="text-green-700 font-semibold hover:underline ml-1">
+      View the rankings →
+    </a>
+  </div>
+  {% endif %}
+</section>
+
+{# ══ History ═════════════════════════════════════════════════════════════ #}
+{% if hist_in or hist_out %}
+<section>
+  <h2 class="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
+    <span class="w-2 h-2 rounded-full bg-slate-300"></span>
+    History
+  </h2>
+
+  <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+
+    {# Incoming history #}
+    {% for ch in hist_in %}
+    <div class="{{ '' if (loop.last and not hist_out) else 'border-b border-slate-100' }}
+                px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+      <div>
+        <p class="text-sm font-medium text-slate-700">
+          <span class="text-green-700">{{ ch.challenger_name }}</span>
+          challenged you
+        </p>
+        <p class="text-xs text-slate-400">{{ ch.created_at.strftime('%d %b %Y') if ch.created_at else '' }}</p>
+      </div>
+      <div class="flex items-center gap-3">
+        {% if ch.status == 'forfeited' %}
+          <span class="text-xs text-red-600 font-medium">You forfeited — no response</span>
+        {% endif %}
+        {{ status_badge(ch.status) }}
+      </div>
+    </div>
+    {% endfor %}
+
+    {# Outgoing history #}
+    {% for ch in hist_out %}
+    <div class="{{ '' if loop.last else 'border-b border-slate-100' }}
+                px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+      <div>
+        <p class="text-sm font-medium text-slate-700">
+          You challenged
+          <span class="text-green-700">{{ ch.challenged_name }}</span>
+        </p>
+        <p class="text-xs text-slate-400">{{ ch.created_at.strftime('%d %b %Y') if ch.created_at else '' }}</p>
+      </div>
+      <div class="flex items-center gap-3">
+        {% if ch.status == 'forfeited' %}
+          <span class="text-xs text-green-600 font-medium">Walkover win</span>
+        {% endif %}
+        {{ status_badge(ch.status) }}
+      </div>
+    </div>
+    {% endfor %}
+
+  </div>
+</section>
+{% endif %}
+
+{# ── Empty state (no challenges at all) ─────────────────────────────────── #}
+{% if not active_in and not active_out and not hist_in and not hist_out %}
+<div class="bg-white rounded-2xl border border-slate-200 px-6 py-16 text-center mt-4">
+  <div class="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-4">
+    <span class="text-3xl">🎾</span>
+  </div>
+  <h2 class="text-base font-semibold text-slate-700 mb-1">No challenges yet</h2>
+  <p class="text-sm text-slate-400 mb-5">Head to the rankings and challenge a player to a match.</p>
+  <a href="{{ url_for('index') }}"
+     class="inline-flex items-center gap-2 bg-green-700 hover:bg-green-600 text-white
+            text-sm font-semibold px-5 py-2.5 rounded-xl shadow-sm transition-colors duration-150">
+    View Rankings
+  </a>
+</div>
+{% endif %}
+
+{% endblock %}
