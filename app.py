@@ -39,6 +39,9 @@ CHALLENGE_RANGE        = 10   # positions either side you can challenge
 MAX_OUTGOING           = 2    # max simultaneous outgoing challenges
 RESPOND_DAYS           = 3    # days to accept/decline before forfeit
 PLAY_DAYS              = 10   # days to play after accepting
+INACTIVITY_DAYS        = 30   # days without a match before penalty
+INACTIVITY_DROP        = 10   # positions dropped for inactivity
+WILDCARD_EVERY         = 3    # earn a wildcard every N matches
 
 
 # ── Password helpers ───────────────────────────────────────────────────────────
@@ -172,6 +175,20 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_chal_challenged ON challenges(challenged_id)"
     )
 
+    conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS wildcard_available BOOLEAN DEFAULT TRUE")
+    conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ DEFAULT NOW()")
+    conn.execute("ALTER TABLE challenges ADD COLUMN IF NOT EXISTS is_wildcard BOOLEAN DEFAULT FALSE")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS season_archives (
+            id          SERIAL PRIMARY KEY,
+            name        TEXT NOT NULL,
+            archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            standings   TEXT NOT NULL
+        )
+    """)
+    # Sync wildcard status with actual match counts for existing players
+    conn.execute("UPDATE players SET wildcard_available = ((wins + losses) % 3 = 0)")
+
     # Seed admin
     if conn.execute(
         "SELECT COUNT(*) AS n FROM users WHERE username = 'admin'"
@@ -256,6 +273,62 @@ def update_ladder(conn: _Conn, winner_id: int, loser_id: int):
     conn.execute("UPDATE players SET position = %s WHERE id = %s", (l_pos, winner_id))
 
 
+# ── Inactivity & wildcard helpers ─────────────────────────────────────────────
+
+def drop_player_places(conn: _Conn, player_id: int, places: int):
+    """Move a player down the ladder by `places` positions (inactivity penalty)."""
+    player = conn.execute("SELECT position FROM players WHERE id = %s", (player_id,)).fetchone()
+    if not player:
+        return
+    max_pos = conn.execute("SELECT MAX(position) AS m FROM players").fetchone()["m"]
+    old_pos = player["position"]
+    new_pos = min(old_pos + places, max_pos)
+    if new_pos == old_pos:
+        return
+    conn.execute(
+        "UPDATE players SET prev_position = position WHERE position > %s AND position <= %s",
+        (old_pos, new_pos),
+    )
+    conn.execute(
+        "UPDATE players SET position = position - 1 WHERE position > %s AND position <= %s",
+        (old_pos, new_pos),
+    )
+    conn.execute(
+        "UPDATE players SET position = %s, prev_position = %s WHERE id = %s",
+        (new_pos, old_pos, player_id),
+    )
+
+
+def update_wildcard(conn: _Conn, player_id: int):
+    """Recalculate wildcard_available after a match is played."""
+    row = conn.execute(
+        "SELECT wins + losses AS total FROM players WHERE id = %s", (player_id,)
+    ).fetchone()
+    if not row:
+        return
+    total = row["total"]
+    has_wildcard = (total > 0 and total % WILDCARD_EVERY == 0)
+    conn.execute(
+        "UPDATE players SET wildcard_available = %s WHERE id = %s",
+        (has_wildcard, player_id),
+    )
+
+
+def check_inactivity(conn: _Conn):
+    """Drop players inactive for INACTIVITY_DAYS and reset their activity clock."""
+    inactive = conn.execute("""
+        SELECT id FROM players
+        WHERE last_active_at < NOW() - INTERVAL '30 days'
+    """).fetchall()
+    for p in inactive:
+        drop_player_places(conn, p["id"], INACTIVITY_DROP)
+        conn.execute(
+            "UPDATE players SET last_active_at = NOW() WHERE id = %s", (p["id"],)
+        )
+    if inactive:
+        conn.commit()
+
+
 # ── Challenge helpers ──────────────────────────────────────────────────────────
 
 def expire_stale_challenges(conn: _Conn):
@@ -293,7 +366,7 @@ def expire_stale_challenges(conn: _Conn):
         conn.commit()
 
 
-def get_challenge_states(conn: _Conn, player_id: int, players: list) -> tuple:
+def get_challenge_states(conn: _Conn, player_id: int, players: list, wildcard_available: bool = False) -> tuple:
     """
     Returns (state_dict, challenge_id_dict).
     state_dict      — player_id → state string
@@ -334,7 +407,8 @@ def get_challenge_states(conn: _Conn, player_id: int, players: list) -> tuple:
         if pid in my_in:
             state[pid] = f"in_{my_in[pid]}"       # in_pending  | in_accepted
             continue
-        if abs(p["position"] - my_pos) > CHALLENGE_RANGE:
+        out_of_range = abs(p["position"] - my_pos) > CHALLENGE_RANGE
+        if out_of_range and not wildcard_available:
             state[pid] = "out_of_range"
             continue
         if pid in occupied:
@@ -343,7 +417,7 @@ def get_challenge_states(conn: _Conn, player_id: int, players: list) -> tuple:
         if outgoing_count >= MAX_OUTGOING:
             state[pid] = "maxed"
             continue
-        state[pid] = "available"
+        state[pid] = "wildcard" if out_of_range else "available"
 
     return state, challenge_ids
 
@@ -372,15 +446,19 @@ def inject_pending_count():
 def index():
     conn = get_db()
     expire_stale_challenges(conn)
+    check_inactivity(conn)
     players = conn.execute("SELECT * FROM players ORDER BY position").fetchall()
 
     challenge_state     = {}
     challenge_ids       = {}
     user_outgoing_count = 0
+    user_has_wildcard   = False
 
     if current_user.is_authenticated and current_user.player_id:
+        me = next((p for p in players if p["id"] == current_user.player_id), None)
+        user_has_wildcard = bool(me["wildcard_available"]) if me else False
         challenge_state, challenge_ids = get_challenge_states(
-            conn, current_user.player_id, players
+            conn, current_user.player_id, players, user_has_wildcard
         )
         user_outgoing_count = conn.execute("""
             SELECT COUNT(*) AS n FROM challenges
@@ -392,7 +470,8 @@ def index():
                            players=players,
                            challenge_state=challenge_state,
                            challenge_ids=challenge_ids,
-                           user_outgoing_count=user_outgoing_count)
+                           user_outgoing_count=user_outgoing_count,
+                           user_has_wildcard=user_has_wildcard)
 
 
 @app.route("/rules")
@@ -617,6 +696,12 @@ def submit_match():
                 OR (challenger_id = %s AND challenged_id = %s))
         """, (match_id, winner_id, loser_id, loser_id, winner_id))
 
+        update_wildcard(conn, int(winner_id))
+        update_wildcard(conn, int(loser_id))
+        conn.execute(
+            "UPDATE players SET last_active_at = NOW() WHERE id = %s OR id = %s",
+            (int(winner_id), int(loser_id)),
+        )
         conn.commit()
         conn.close()
         flash("Match result recorded!", "success")
@@ -732,10 +817,13 @@ def send_challenge(player_id):
         flash("Invalid challenge target.", "error")
         return redirect(url_for("index"))
 
+    is_wildcard = False
     if abs(me["position"] - target["position"]) > CHALLENGE_RANGE:
-        conn.close()
-        flash(f"You can only challenge players within {CHALLENGE_RANGE} positions of you.", "error")
-        return redirect(url_for("index"))
+        if not me["wildcard_available"]:
+            conn.close()
+            flash(f"You can only challenge players within {CHALLENGE_RANGE} positions of you.", "error")
+            return redirect(url_for("index"))
+        is_wildcard = True
 
     if conn.execute("""
         SELECT id FROM challenges
@@ -765,8 +853,8 @@ def send_challenge(player_id):
         return redirect(url_for("index"))
 
     conn.execute(
-        "INSERT INTO challenges (challenger_id, challenged_id) VALUES (%s, %s)",
-        (current_user.player_id, player_id),
+        "INSERT INTO challenges (challenger_id, challenged_id, is_wildcard) VALUES (%s, %s, %s)",
+        (current_user.player_id, player_id, is_wildcard),
     )
 
     # Fetch the challenged player's email for notification
@@ -785,7 +873,10 @@ def send_challenge(player_id):
             base_url=request.host_url,
         )
 
-    flash(f"Challenge sent to {target['name']}! They have {RESPOND_DAYS} days to respond.", "success")
+    if is_wildcard:
+        flash(f"⚡ Wildcard challenge sent to {target['name']}! They have {RESPOND_DAYS} days to respond.", "success")
+    else:
+        flash(f"Challenge sent to {target['name']}! They have {RESPOND_DAYS} days to respond.", "success")
     return redirect(url_for("index"))
 
 
@@ -868,6 +959,98 @@ def cancel_challenge(challenge_id):
     conn.close()
     flash("Challenge cancelled.", "success")
     return redirect(url_for("challenges"))
+
+
+# ── Routes: player profiles ───────────────────────────────────────────────────
+
+@app.route("/player/<int:player_id>")
+@login_required
+def player_profile(player_id):
+    conn = get_db()
+    player = conn.execute("SELECT * FROM players WHERE id = %s", (player_id,)).fetchone()
+    if not player:
+        conn.close(); abort(404)
+
+    matches = conn.execute("""
+        SELECT m.score, m.played_at,
+               w.name AS winner_name, w.id AS winner_id,
+               l.name AS loser_name,  l.id AS loser_id
+        FROM matches m
+        JOIN players w ON w.id = m.winner_id
+        JOIN players l ON l.id = m.loser_id
+        WHERE m.winner_id = %s OR m.loser_id = %s
+        ORDER BY m.id DESC
+    """, (player_id, player_id)).fetchall()
+
+    conn.close()
+    return render_template("player_profile.html", player=player, matches=matches)
+
+
+# ── Routes: admin panel ───────────────────────────────────────────────────────
+
+@app.route("/admin")
+@admin_required
+def admin_panel():
+    conn = get_db()
+    expire_stale_challenges(conn)
+    check_inactivity(conn)
+
+    warning_players = conn.execute("""
+        SELECT id, name, position, last_active_at,
+               EXTRACT(DAY FROM NOW() - last_active_at)::int AS days_inactive
+        FROM players
+        WHERE last_active_at < NOW() - INTERVAL '15 days'
+        ORDER BY last_active_at ASC
+    """).fetchall()
+
+    archives = conn.execute(
+        "SELECT id, name, archived_at FROM season_archives ORDER BY archived_at DESC"
+    ).fetchall()
+
+    conn.close()
+    return render_template("admin.html", warning_players=warning_players, archives=archives)
+
+
+@app.route("/admin/season-reset", methods=["POST"])
+@admin_required
+def season_reset():
+    import json
+    season_name = request.form.get("season_name", "").strip() or "Season"
+    conn = get_db()
+
+    players = conn.execute(
+        "SELECT id, name, position, wins, losses FROM players ORDER BY position"
+    ).fetchall()
+    conn.execute(
+        "INSERT INTO season_archives (name, standings) VALUES (%s, %s)",
+        (season_name, json.dumps([dict(p) for p in players])),
+    )
+    conn.execute("DELETE FROM challenges")
+    conn.execute("DELETE FROM matches")
+    conn.execute("""
+        UPDATE players
+        SET wins = 0, losses = 0, prev_position = NULL,
+            wildcard_available = TRUE, last_active_at = NOW()
+    """)
+    conn.commit()
+    conn.close()
+    flash(f"Season '{season_name}' archived. Stats and matches cleared for the new season.", "success")
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/season/<int:archive_id>")
+@admin_required
+def season_archive(archive_id):
+    import json
+    conn = get_db()
+    archive = conn.execute(
+        "SELECT * FROM season_archives WHERE id = %s", (archive_id,)
+    ).fetchone()
+    if not archive:
+        conn.close(); abort(404)
+    standings = json.loads(archive["standings"])
+    conn.close()
+    return render_template("season_archive.html", archive=archive, standings=standings)
 
 
 # ── Startup ────────────────────────────────────────────────────────────────────

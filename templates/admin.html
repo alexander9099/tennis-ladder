@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Admin — OA Summer Tennis Ladder{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-slate-900">Admin Panel</h1>
+    <p class="text-sm text-slate-500 mt-0.5">Manage the OA Summer Tennis Ladder</p>
+  </div>
+
+  <!-- Inactivity warnings -->
+  <section class="mb-8">
+    <h2 class="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+      Inactivity Warnings
+    </h2>
+
+    {% if warning_players %}
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {% for p in warning_players %}
+      <div class="{{ '' if loop.last else 'border-b border-slate-100' }} px-5 py-3.5 flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-semibold text-slate-800">
+            <a href="{{ url_for('player_profile', player_id=p.id) }}" class="hover:text-green-700">
+              #{{ p.position }} — {{ p.name }}
+            </a>
+          </p>
+          <p class="text-xs text-slate-400 mt-0.5">Last active {{ p.days_inactive }} day{{ 's' if p.days_inactive != 1 }} ago</p>
+        </div>
+        {% set days_left = 30 - p.days_inactive %}
+        {% if days_left <= 5 %}
+          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+            {{ days_left }} day{{ 's' if days_left != 1 }} until drop
+          </span>
+        {% else %}
+          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+            {{ days_left }} days until drop
+          </span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-white rounded-2xl border border-slate-200 px-5 py-8 text-center text-slate-400 text-sm">
+      All players have been active within the last 15 days.
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- Season management -->
+  <section class="mb-8">
+    <h2 class="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-green-500"></span>
+      Season Management
+    </h2>
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <p class="text-sm text-slate-600 mb-1">Archive the current season and reset all stats for a fresh start.</p>
+      <p class="text-xs text-slate-400 mb-5">Player accounts and current ladder positions are kept. Wins, losses, challenges, and match history are cleared.</p>
+      <form method="POST" action="{{ url_for('season_reset') }}"
+            onsubmit="return confirm('Archive this season and reset all stats? This cannot be undone.')">
+        <div class="flex gap-3">
+          <input type="text" name="season_name" placeholder="e.g. Summer 2025"
+                 required
+                 class="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-2.5
+                        text-sm text-slate-900 placeholder:text-slate-300
+                        focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition" />
+          <button type="submit"
+                  class="inline-flex items-center gap-2 bg-green-700 hover:bg-green-600
+                         text-white text-sm font-semibold px-5 py-2.5 rounded-xl shadow-sm
+                         transition-colors duration-150">
+            Archive &amp; Reset
+          </button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Past archives -->
+  {% if archives %}
+  <section>
+    <h2 class="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-slate-300"></span>
+      Past Seasons
+    </h2>
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {% for a in archives %}
+      <div class="{{ '' if loop.last else 'border-b border-slate-100' }} px-5 py-3.5 flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-semibold text-slate-800">{{ a.name }}</p>
+          <p class="text-xs text-slate-400 mt-0.5">Archived {{ a.archived_at.strftime('%d %b %Y') if a.archived_at else '' }}</p>
+        </div>
+        <a href="{{ url_for('season_archive', archive_id=a.id) }}"
+           class="text-sm font-medium text-green-700 hover:underline shrink-0">
+          View standings →
+        </a>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+</div>
+{% endblock %}
