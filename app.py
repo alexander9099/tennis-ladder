@@ -42,6 +42,7 @@ PLAY_DAYS              = 10   # days to play after accepting
 INACTIVITY_DAYS        = 30   # days without a match before penalty
 INACTIVITY_DROP        = 10   # positions dropped for inactivity
 WILDCARD_EVERY         = 3    # earn a wildcard every N matches
+AVAILABILITY_RETURN_DROP = 3  # positions dropped when returning from unavailability
 
 
 # ── Password helpers ───────────────────────────────────────────────────────────
@@ -177,7 +178,11 @@ def init_db():
 
     conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS wildcard_available BOOLEAN DEFAULT TRUE")
     conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ DEFAULT NOW()")
+    conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS is_available BOOLEAN DEFAULT TRUE")
+    conn.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS is_on_ladder BOOLEAN DEFAULT TRUE")
     conn.execute("ALTER TABLE challenges ADD COLUMN IF NOT EXISTS is_wildcard BOOLEAN DEFAULT FALSE")
+    conn.execute("ALTER TABLE challenges ADD COLUMN IF NOT EXISTS remind_respond_sent BOOLEAN DEFAULT FALSE")
+    conn.execute("ALTER TABLE challenges ADD COLUMN IF NOT EXISTS remind_play_sent BOOLEAN DEFAULT FALSE")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS season_archives (
             id          SERIAL PRIMARY KEY,
@@ -253,6 +258,133 @@ def send_challenge_email(to_email: str, to_name: str, challenger_name: str, base
         app.logger.error(f"SendGrid error: {exc}")
 
 
+# ── Reminder emails ───────────────────────────────────────────────────────────
+
+def send_reminder_email(to_email: str, to_name: str, subject: str, body_html: str):
+    """Send a deadline reminder via SendGrid. Silent no-op if API key not set."""
+    api_key   = os.environ.get("SENDGRID_API_KEY")
+    from_addr = os.environ.get("FROM_EMAIL", "noreply@example.com")
+    if not api_key:
+        app.logger.info(f"[email] No SENDGRID_API_KEY — skipping reminder to {to_email}")
+        return
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helper.mail import Mail as SGMail
+        msg = SGMail(from_email=from_addr, to_emails=to_email,
+                     subject=subject, html_content=body_html)
+        SendGridAPIClient(api_key).send(msg)
+    except Exception as exc:
+        app.logger.error(f"SendGrid error: {exc}")
+
+
+def send_deadline_reminders(conn: _Conn):
+    """Send 24-hour warning emails for approaching challenge deadlines."""
+    base_url = os.environ.get("APP_BASE_URL", "http://localhost:5000/")
+    if not base_url.endswith("/"):
+        base_url += "/"
+
+    # ── Response deadline: notify the challenged player ────────────────────────
+    resp_due = conn.execute("""
+        SELECT c.id, cp.name AS challenger_name,
+               u.email AS to_email, u.username AS to_username
+        FROM challenges c
+        JOIN players cp ON cp.id = c.challenger_id
+        LEFT JOIN users u ON u.player_id = c.challenged_id
+        WHERE c.status = 'pending'
+          AND c.deadline_respond BETWEEN NOW() AND NOW() + INTERVAL '24 hours'
+          AND c.remind_respond_sent = FALSE
+          AND u.email IS NOT NULL
+    """).fetchall()
+
+    for r in resp_due:
+        html = f"""
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;">
+          <div style="background:#166534;padding:20px 24px;border-radius:12px 12px 0 0;">
+            <h1 style="color:white;margin:0;font-size:20px;">🎾 OA Summer Tennis Ladder</h1>
+          </div>
+          <div style="background:#ffffff;padding:28px 24px;border:1px solid #e5e7eb;
+                      border-top:none;border-radius:0 0 12px 12px;">
+            <p style="margin:0 0 12px;color:#111827;">Hi <strong>{r['to_username']}</strong>,</p>
+            <p style="margin:0 0 20px;color:#374151;">
+              Reminder: <strong>{r['challenger_name']}</strong> has challenged you and you have
+              less than 24 hours to respond. If you don't respond the match will be awarded
+              to your challenger as a walkover.
+            </p>
+            <a href="{base_url}challenges"
+               style="display:inline-block;background:#166534;color:white;text-decoration:none;
+                      padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">
+              Respond Now →
+            </a>
+          </div>
+        </div>
+        """
+        send_reminder_email(
+            r["to_email"], r["to_username"],
+            f"⏰ Reminder: respond to {r['challenger_name']}'s challenge before it expires",
+            html,
+        )
+        conn.execute(
+            "UPDATE challenges SET remind_respond_sent = TRUE WHERE id = %s", (r["id"],)
+        )
+
+    # ── Play deadline: notify both players ─────────────────────────────────────
+    play_due = conn.execute("""
+        SELECT c.id,
+               pc.name AS challenger_name, pp.name AS challenged_name,
+               uc.email AS challenger_email, uc.username AS challenger_username,
+               up.email AS challenged_email, up.username AS challenged_username
+        FROM challenges c
+        JOIN players pc ON pc.id = c.challenger_id
+        JOIN players pp ON pp.id = c.challenged_id
+        LEFT JOIN users uc ON uc.player_id = c.challenger_id
+        LEFT JOIN users up ON up.player_id = c.challenged_id
+        WHERE c.status = 'accepted'
+          AND c.deadline_play BETWEEN NOW() AND NOW() + INTERVAL '24 hours'
+          AND c.remind_play_sent = FALSE
+    """).fetchall()
+
+    for r in play_due:
+        for (email, username, opponent) in [
+            (r["challenger_email"], r["challenger_username"], r["challenged_name"]),
+            (r["challenged_email"], r["challenged_username"], r["challenger_name"]),
+        ]:
+            if not email:
+                continue
+            html = f"""
+            <div style="font-family:sans-serif;max-width:480px;margin:0 auto;">
+              <div style="background:#166534;padding:20px 24px;border-radius:12px 12px 0 0;">
+                <h1 style="color:white;margin:0;font-size:20px;">🎾 OA Summer Tennis Ladder</h1>
+              </div>
+              <div style="background:#ffffff;padding:28px 24px;border:1px solid #e5e7eb;
+                          border-top:none;border-radius:0 0 12px 12px;">
+                <p style="margin:0 0 12px;color:#111827;">Hi <strong>{username}</strong>,</p>
+                <p style="margin:0 0 20px;color:#374151;">
+                  Reminder: you have less than 24 hours to play your match against
+                  <strong>{opponent}</strong>. Submit the result before the deadline —
+                  if the match isn't played in time the challenge will expire with no
+                  position change.
+                </p>
+                <a href="{base_url}submit"
+                   style="display:inline-block;background:#166534;color:white;text-decoration:none;
+                          padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">
+                  Submit Result →
+                </a>
+              </div>
+            </div>
+            """
+            send_reminder_email(
+                email, username,
+                f"⏰ Reminder: play your match against {opponent} before it expires",
+                html,
+            )
+        conn.execute(
+            "UPDATE challenges SET remind_play_sent = TRUE WHERE id = %s", (r["id"],)
+        )
+
+    if resp_due or play_due:
+        conn.commit()
+
+
 # ── Ladder logic ───────────────────────────────────────────────────────────────
 
 def update_ladder(conn: _Conn, winner_id: int, loser_id: int):
@@ -280,7 +412,7 @@ def drop_player_places(conn: _Conn, player_id: int, places: int):
     player = conn.execute("SELECT position FROM players WHERE id = %s", (player_id,)).fetchone()
     if not player:
         return
-    max_pos = conn.execute("SELECT MAX(position) AS m FROM players").fetchone()["m"]
+    max_pos = conn.execute("SELECT MAX(position) AS m FROM players WHERE is_on_ladder = TRUE").fetchone()["m"]
     old_pos = player["position"]
     new_pos = min(old_pos + places, max_pos)
     if new_pos == old_pos:
@@ -319,6 +451,8 @@ def check_inactivity(conn: _Conn):
     inactive = conn.execute("""
         SELECT id FROM players
         WHERE last_active_at < NOW() - INTERVAL '30 days'
+          AND is_available = TRUE
+          AND is_on_ladder = TRUE
     """).fetchall()
     for p in inactive:
         drop_player_places(conn, p["id"], INACTIVITY_DROP)
@@ -407,6 +541,9 @@ def get_challenge_states(conn: _Conn, player_id: int, players: list, wildcard_av
         if pid in my_in:
             state[pid] = f"in_{my_in[pid]}"       # in_pending  | in_accepted
             continue
+        if not p.get("is_available", True):
+            state[pid] = "unavailable"
+            continue
         out_of_range = abs(p["position"] - my_pos) > CHALLENGE_RANGE
         if out_of_range and not wildcard_available:
             state[pid] = "out_of_range"
@@ -447,7 +584,10 @@ def index():
     conn = get_db()
     expire_stale_challenges(conn)
     check_inactivity(conn)
-    players = conn.execute("SELECT * FROM players ORDER BY position").fetchall()
+    send_deadline_reminders(conn)
+    players = conn.execute(
+        "SELECT * FROM players WHERE is_on_ladder = TRUE ORDER BY position"
+    ).fetchall()
 
     challenge_state     = {}
     challenge_ids       = {}
@@ -817,6 +957,11 @@ def send_challenge(player_id):
         flash("Invalid challenge target.", "error")
         return redirect(url_for("index"))
 
+    if not target["is_available"]:
+        conn.close()
+        flash(f"{target['name']} is currently unavailable and cannot be challenged.", "error")
+        return redirect(url_for("index"))
+
     is_wildcard = False
     if abs(me["position"] - target["position"]) > CHALLENGE_RANGE:
         if not me["wildcard_available"]:
@@ -994,21 +1139,30 @@ def admin_panel():
     conn = get_db()
     expire_stale_challenges(conn)
     check_inactivity(conn)
+    send_deadline_reminders(conn)
 
     warning_players = conn.execute("""
         SELECT id, name, position, last_active_at,
                EXTRACT(DAY FROM NOW() - last_active_at)::int AS days_inactive
         FROM players
-        WHERE last_active_at < NOW() - INTERVAL '15 days'
+        WHERE is_available = TRUE AND is_on_ladder = TRUE
+          AND last_active_at < NOW() - INTERVAL '15 days'
         ORDER BY last_active_at ASC
     """).fetchall()
+
+    all_players = conn.execute(
+        "SELECT * FROM players ORDER BY is_on_ladder DESC NULLS LAST, position NULLS LAST, name"
+    ).fetchall()
 
     archives = conn.execute(
         "SELECT id, name, archived_at FROM season_archives ORDER BY archived_at DESC"
     ).fetchall()
 
     conn.close()
-    return render_template("admin.html", warning_players=warning_players, archives=archives)
+    return render_template("admin.html",
+                           warning_players=warning_players,
+                           all_players=all_players,
+                           archives=archives)
 
 
 @app.route("/admin/season-reset", methods=["POST"])
@@ -1051,6 +1205,221 @@ def season_archive(archive_id):
     standings = json.loads(archive["standings"])
     conn.close()
     return render_template("season_archive.html", archive=archive, standings=standings)
+
+
+# ── Routes: availability & leave ladder ──────────────────────────────────────
+
+@app.route("/player/set-availability", methods=["POST"])
+@login_required
+def set_availability():
+    if not current_user.player_id:
+        flash("Your account isn't linked to a player profile.", "error")
+        return redirect(url_for("index"))
+
+    make_available = request.form.get("available") == "1"
+    conn = get_db()
+    player = conn.execute(
+        "SELECT * FROM players WHERE id = %s", (current_user.player_id,)
+    ).fetchone()
+
+    if not player or not player["is_on_ladder"]:
+        conn.close()
+        flash("Player not found.", "error")
+        return redirect(url_for("index"))
+
+    if make_available:
+        drop_player_places(conn, current_user.player_id, AVAILABILITY_RETURN_DROP)
+        conn.execute(
+            "UPDATE players SET is_available = TRUE, last_active_at = NOW() WHERE id = %s",
+            (current_user.player_id,),
+        )
+        conn.commit()
+        conn.close()
+        flash(f"You're back on the ladder. You've dropped {AVAILABILITY_RETURN_DROP} places from your current position.", "success")
+    else:
+        conn.execute("""
+            UPDATE challenges SET status = 'cancelled'
+            WHERE status IN ('pending', 'accepted')
+              AND (challenger_id = %s OR challenged_id = %s)
+        """, (current_user.player_id, current_user.player_id))
+        conn.execute(
+            "UPDATE players SET is_available = FALSE WHERE id = %s",
+            (current_user.player_id,),
+        )
+        conn.commit()
+        conn.close()
+        flash("You're now marked as unavailable. Your active challenges have been cancelled.", "success")
+
+    return redirect(url_for("player_profile", player_id=current_user.player_id))
+
+
+@app.route("/player/leave", methods=["POST"])
+@login_required
+def leave_ladder():
+    if not current_user.player_id:
+        flash("Your account isn't linked to a player profile.", "error")
+        return redirect(url_for("index"))
+
+    conn = get_db()
+    player = conn.execute(
+        "SELECT * FROM players WHERE id = %s", (current_user.player_id,)
+    ).fetchone()
+
+    if not player or not player["is_on_ladder"]:
+        conn.close()
+        flash("You're not currently on the ladder.", "error")
+        return redirect(url_for("player_profile", player_id=current_user.player_id))
+
+    conn.execute("""
+        UPDATE challenges SET status = 'cancelled'
+        WHERE status IN ('pending', 'accepted')
+          AND (challenger_id = %s OR challenged_id = %s)
+    """, (current_user.player_id, current_user.player_id))
+
+    old_pos = player["position"]
+    conn.execute(
+        "UPDATE players SET position = position - 1 WHERE position > %s AND is_on_ladder = TRUE",
+        (old_pos,),
+    )
+    conn.execute(
+        "UPDATE players SET is_on_ladder = FALSE, position = NULL WHERE id = %s",
+        (current_user.player_id,),
+    )
+    conn.commit()
+    conn.close()
+    flash("You have left the ladder. Your match history is preserved. You can rejoin at any time.", "success")
+    return redirect(url_for("player_profile", player_id=current_user.player_id))
+
+
+@app.route("/player/rejoin", methods=["POST"])
+@login_required
+def rejoin_ladder():
+    if not current_user.player_id:
+        flash("Your account isn't linked to a player profile.", "error")
+        return redirect(url_for("index"))
+
+    conn = get_db()
+    player = conn.execute(
+        "SELECT * FROM players WHERE id = %s", (current_user.player_id,)
+    ).fetchone()
+
+    if not player or player["is_on_ladder"]:
+        conn.close()
+        flash("You're already on the ladder.", "error")
+        return redirect(url_for("index"))
+
+    max_pos = conn.execute(
+        "SELECT COALESCE(MAX(position), 0) AS m FROM players WHERE is_on_ladder = TRUE"
+    ).fetchone()["m"]
+
+    conn.execute(
+        "UPDATE players SET is_on_ladder = TRUE, is_available = TRUE, position = %s, "
+        "last_active_at = NOW() WHERE id = %s",
+        (max_pos + 1, current_user.player_id),
+    )
+    conn.commit()
+    conn.close()
+    flash("Welcome back! You've been added to the bottom of the ladder.", "success")
+    return redirect(url_for("player_profile", player_id=current_user.player_id))
+
+
+# ── Routes: admin player management ──────────────────────────────────────────
+
+@app.route("/admin/player/<int:player_id>/set-availability", methods=["POST"])
+@admin_required
+def admin_set_availability(player_id):
+    make_available = request.form.get("available") == "1"
+    conn = get_db()
+    player = conn.execute("SELECT * FROM players WHERE id = %s", (player_id,)).fetchone()
+
+    if not player:
+        conn.close()
+        flash("Player not found.", "error")
+        return redirect(url_for("admin_panel"))
+
+    if make_available:
+        if not player["is_available"] and player["is_on_ladder"]:
+            drop_player_places(conn, player_id, AVAILABILITY_RETURN_DROP)
+        conn.execute(
+            "UPDATE players SET is_available = TRUE, last_active_at = NOW() WHERE id = %s",
+            (player_id,),
+        )
+        conn.commit()
+        conn.close()
+        flash(f"{player['name']} is now available and has dropped {AVAILABILITY_RETURN_DROP} places.", "success")
+    else:
+        conn.execute("""
+            UPDATE challenges SET status = 'cancelled'
+            WHERE status IN ('pending', 'accepted')
+              AND (challenger_id = %s OR challenged_id = %s)
+        """, (player_id, player_id))
+        conn.execute(
+            "UPDATE players SET is_available = FALSE WHERE id = %s", (player_id,)
+        )
+        conn.commit()
+        conn.close()
+        flash(f"{player['name']} has been marked as unavailable.", "success")
+
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/adjust-position", methods=["POST"])
+@admin_required
+def admin_adjust_position():
+    player_id   = request.form.get("player_id", "").strip()
+    new_pos_str = request.form.get("new_position", "").strip()
+
+    if not player_id or not new_pos_str:
+        flash("Please select a player and enter a position.", "error")
+        return redirect(url_for("admin_panel"))
+
+    try:
+        new_pos = int(new_pos_str)
+    except ValueError:
+        flash("Position must be a number.", "error")
+        return redirect(url_for("admin_panel"))
+
+    conn = get_db()
+    player = conn.execute(
+        "SELECT * FROM players WHERE id = %s AND is_on_ladder = TRUE", (player_id,)
+    ).fetchone()
+
+    if not player:
+        conn.close()
+        flash("Player not found or not currently on the ladder.", "error")
+        return redirect(url_for("admin_panel"))
+
+    max_pos = conn.execute(
+        "SELECT MAX(position) AS m FROM players WHERE is_on_ladder = TRUE"
+    ).fetchone()["m"]
+    new_pos = max(1, min(new_pos, max_pos))
+    old_pos = player["position"]
+
+    if new_pos == old_pos:
+        conn.close()
+        flash(f"{player['name']} is already at position #{old_pos}.", "success")
+        return redirect(url_for("admin_panel"))
+
+    pid = int(player_id)
+    if new_pos < old_pos:
+        conn.execute("""
+            UPDATE players SET position = position + 1
+            WHERE position >= %s AND position < %s AND id != %s AND is_on_ladder = TRUE
+        """, (new_pos, old_pos, pid))
+    else:
+        conn.execute("""
+            UPDATE players SET position = position - 1
+            WHERE position > %s AND position <= %s AND id != %s AND is_on_ladder = TRUE
+        """, (old_pos, new_pos, pid))
+
+    conn.execute(
+        "UPDATE players SET position = %s, prev_position = %s WHERE id = %s",
+        (new_pos, old_pos, pid),
+    )
+    conn.commit()
+    conn.close()
+    flash(f"{player['name']} moved from #{old_pos} to #{new_pos}.", "success")
+    return redirect(url_for("admin_panel"))
 
 
 # ── Startup ────────────────────────────────────────────────────────────────────

@@ -100,6 +100,8 @@
         <a href="{{ url_for('player_profile', player_id=p.id) }}" class="hover:underline">{{ p.name }}</a>
         {% if state == 'self' %}
           <span class="ml-1.5 text-[10px] font-bold uppercase tracking-wider text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full">You</span>
+        {% elif not p.is_available %}
+          <span class="ml-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">Away</span>
         {% endif %}
       </p>
       {% if p.position == 1 %}
@@ -171,6 +173,12 @@
             ⚡ Wildcard
           </button>
         </form>
+
+      {% elif state == 'unavailable' %}
+        <span class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold
+                     bg-slate-100 text-slate-400 cursor-default select-none">
+          Away
+        </span>
 
       {% elif state == 'ineligible' %}
         <span class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold
