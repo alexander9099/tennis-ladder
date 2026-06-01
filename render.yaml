@@ -14,3 +14,11 @@ services:
         sync: false                # Set to your own secure password
       - key: PYTHON_VERSION
         value: 3.11.0
+
+  - type: cron
+    name: keep-alive
+    runtime: python
+    plan: free
+    schedule: "*/10 * * * *"
+    buildCommand: ""
+    startCommand: python -c "import urllib.request; urllib.request.urlopen('https://tennis-ladder.onrender.com/ping')"

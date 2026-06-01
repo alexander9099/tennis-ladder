@@ -579,6 +579,11 @@ def inject_pending_count():
 
 # ── Routes: public ─────────────────────────────────────────────────────────────
 
+@app.route("/ping")
+def ping():
+    from flask import jsonify
+    return jsonify({"status": "ok"})
+
 @app.route("/")
 def index():
     conn = get_db()
