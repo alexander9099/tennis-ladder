@@ -21,4 +21,4 @@ services:
     plan: free
     schedule: "*/10 * * * *"
     buildCommand: ""
-    startCommand: python -c "import urllib.request; urllib.request.urlopen('https://tennis-ladder.onrender.com/ping')"
+    startCommand: python -c "import urllib.request; urllib.request.urlopen('https://tennis-ladder-g8hm.onrender.com/ping')"
