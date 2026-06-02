@@ -132,6 +132,18 @@
           {% else %}
             <span class="text-xs text-slate-400">Left ladder</span>
           {% endif %}
+          <form method="POST" action="{{ url_for('admin_rename_player', player_id=p.id) }}"
+                id="rename-form-{{ p.id }}"
+                onsubmit="return handleRename(this, '{{ p.name }}')">
+            <input type="hidden" name="new_name" id="rename-input-{{ p.id }}">
+            <button type="button"
+                    onclick="promptRename({{ p.id }}, '{{ p.name }}')"
+                    class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold
+                           bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200
+                           transition-colors duration-150">
+              Rename
+            </button>
+          </form>
           <form method="POST" action="{{ url_for('admin_delete_player', player_id=p.id) }}"
                 onsubmit="return confirm('Permanently delete {{ p.name }}? This cannot be undone.')">
             <button type="submit"
@@ -145,6 +157,45 @@
       </div>
       {% endfor %}
     </div>
+  </section>
+
+  <!-- Active challenges -->
+  <section class="mb-8">
+    <h2 class="text-base font-bold text-slate-700 mb-3 flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-purple-400"></span>
+      Active Challenges
+    </h2>
+    {% if active_challenges %}
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {% for c in active_challenges %}
+      <div class="{{ '' if loop.last else 'border-b border-slate-100' }}
+                  px-5 py-3.5 flex items-center justify-between gap-4">
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-slate-800 truncate">
+            {{ c.challenger_name }} → {{ c.challenged_name }}
+          </p>
+          <p class="text-xs text-slate-400 mt-0.5">
+            {{ 'Pending response' if c.status == 'pending' else 'Accepted — awaiting result' }}
+            · Sent {{ c.created_at.strftime('%d %b') if c.created_at else '' }}
+          </p>
+        </div>
+        <form method="POST" action="{{ url_for('admin_cancel_challenge', challenge_id=c.id) }}"
+              onsubmit="return confirm('Cancel the challenge between {{ c.challenger_name }} and {{ c.challenged_name }}?')">
+          <button type="submit"
+                  class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold
+                         bg-red-50 hover:bg-red-100 text-red-700 border border-red-200
+                         transition-colors duration-150 shrink-0">
+            Cancel
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-white rounded-2xl border border-slate-200 px-5 py-8 text-center text-slate-400 text-sm">
+      No active challenges at the moment.
+    </div>
+    {% endif %}
   </section>
 
   <!-- Season management -->
@@ -200,4 +251,13 @@
   {% endif %}
 
 </div>
+
+<script>
+  function promptRename(playerId, currentName) {
+    const newName = prompt('Enter new name for ' + currentName + ':', currentName);
+    if (!newName || newName.trim() === '' || newName.trim() === currentName) return;
+    document.getElementById('rename-input-' + playerId).value = newName.trim();
+    document.getElementById('rename-form-' + playerId).submit();
+  }
+</script>
 {% endblock %}

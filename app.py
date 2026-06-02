@@ -1159,6 +1159,16 @@ def admin_panel():
         "SELECT * FROM players ORDER BY is_on_ladder DESC NULLS LAST, position NULLS LAST, name"
     ).fetchall()
 
+    active_challenges = conn.execute("""
+        SELECT c.id, c.status, c.created_at,
+               pc.name AS challenger_name, pp.name AS challenged_name
+        FROM challenges c
+        JOIN players pc ON pc.id = c.challenger_id
+        JOIN players pp ON pp.id = c.challenged_id
+        WHERE c.status IN ('pending', 'accepted')
+        ORDER BY c.created_at ASC
+    """).fetchall()
+
     archives = conn.execute(
         "SELECT id, name, archived_at FROM season_archives ORDER BY archived_at DESC"
     ).fetchall()
@@ -1167,6 +1177,7 @@ def admin_panel():
     return render_template("admin.html",
                            warning_players=warning_players,
                            all_players=all_players,
+                           active_challenges=active_challenges,
                            archives=archives)
 
 
@@ -1475,6 +1486,73 @@ def admin_delete_player(player_id):
     conn.commit()
     conn.close()
     flash(f"{player['name']} has been permanently deleted from the ladder.", "success")
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/player/<int:player_id>/rename", methods=["POST"])
+@admin_required
+def admin_rename_player(player_id):
+    new_name = request.form.get("new_name", "").strip()
+
+    if not new_name:
+        flash("Name cannot be empty.", "error")
+        return redirect(url_for("admin_panel"))
+
+    conn = get_db()
+    player = conn.execute("SELECT * FROM players WHERE id = %s", (player_id,)).fetchone()
+
+    if not player:
+        conn.close()
+        flash("Player not found.", "error")
+        return redirect(url_for("admin_panel"))
+
+    existing = conn.execute(
+        "SELECT id FROM players WHERE name = %s AND id != %s", (new_name, player_id)
+    ).fetchone()
+
+    if existing:
+        conn.close()
+        flash(f"A player named '{new_name}' already exists.", "error")
+        return redirect(url_for("admin_panel"))
+
+    conn.execute("UPDATE players SET name = %s WHERE id = %s", (new_name, player_id))
+    conn.commit()
+    conn.close()
+    flash(f"Player renamed to '{new_name}'.", "success")
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/challenge/<int:challenge_id>/cancel", methods=["POST"])
+@admin_required
+def admin_cancel_challenge(challenge_id):
+    conn = get_db()
+    challenge = conn.execute("""
+        SELECT c.*, pc.name AS challenger_name, pp.name AS challenged_name
+        FROM challenges c
+        JOIN players pc ON pc.id = c.challenger_id
+        JOIN players pp ON pp.id = c.challenged_id
+        WHERE c.id = %s
+    """, (challenge_id,)).fetchone()
+
+    if not challenge:
+        conn.close()
+        flash("Challenge not found.", "error")
+        return redirect(url_for("admin_panel"))
+
+    if challenge["status"] not in ("pending", "accepted"):
+        conn.close()
+        flash("This challenge is no longer active.", "error")
+        return redirect(url_for("admin_panel"))
+
+    conn.execute(
+        "UPDATE challenges SET status = 'cancelled' WHERE id = %s", (challenge_id,)
+    )
+    conn.commit()
+    conn.close()
+    flash(
+        f"Challenge between {challenge['challenger_name']} and {challenge['challenged_name']} cancelled.",
+        "success",
+    )
     return redirect(url_for("admin_panel"))
 
 
