@@ -132,6 +132,15 @@
           {% else %}
             <span class="text-xs text-slate-400">Left ladder</span>
           {% endif %}
+          <form method="POST" action="{{ url_for('admin_delete_player', player_id=p.id) }}"
+                onsubmit="return confirm('Permanently delete {{ p.name }}? This cannot be undone.')">
+            <button type="submit"
+                    class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold
+                           bg-red-50 hover:bg-red-100 text-red-700 border border-red-200
+                           transition-colors duration-150">
+              Delete
+            </button>
+          </form>
         </div>
       </div>
       {% endfor %}

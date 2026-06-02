@@ -1427,6 +1427,57 @@ def admin_adjust_position():
     return redirect(url_for("admin_panel"))
 
 
+@app.route("/admin/player/<int:player_id>/delete", methods=["POST"])
+@admin_required
+def admin_delete_player(player_id):
+    conn = get_db()
+    player = conn.execute("SELECT * FROM players WHERE id = %s", (player_id,)).fetchone()
+
+    if not player:
+        conn.close()
+        flash("Player not found.", "error")
+        return redirect(url_for("admin_panel"))
+
+    # Block delete if the player has any match history to protect data integrity
+    match_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM matches WHERE winner_id = %s OR loser_id = %s",
+        (player_id, player_id),
+    ).fetchone()["n"]
+
+    if match_count > 0:
+        conn.close()
+        flash(
+            f"Cannot delete {player['name']} — they have match history. "
+            "Use 'Mark Unavailable' to remove them from active play instead.",
+            "error",
+        )
+        return redirect(url_for("admin_panel"))
+
+    # Cancel any open challenges
+    conn.execute("""
+        UPDATE challenges SET status = 'cancelled'
+        WHERE status IN ('pending', 'accepted')
+          AND (challenger_id = %s OR challenged_id = %s)
+    """, (player_id, player_id))
+
+    # Close the position gap left by this player
+    if player["is_on_ladder"] and player["position"]:
+        conn.execute("""
+            UPDATE players SET position = position - 1
+            WHERE position > %s AND is_on_ladder = TRUE
+        """, (player["position"],))
+
+    # Remove all traces of the player
+    conn.execute("DELETE FROM challenges WHERE challenger_id = %s OR challenged_id = %s", (player_id, player_id))
+    conn.execute("DELETE FROM users WHERE player_id = %s", (player_id,))
+    conn.execute("DELETE FROM players WHERE id = %s", (player_id,))
+
+    conn.commit()
+    conn.close()
+    flash(f"{player['name']} has been permanently deleted from the ladder.", "success")
+    return redirect(url_for("admin_panel"))
+
+
 # ── Startup ────────────────────────────────────────────────────────────────────
 
 if DATABASE_URL:
